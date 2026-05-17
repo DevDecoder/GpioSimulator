@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Concurrent;
+using System.Device.Gpio;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace System.Device.Gpio
+namespace DevDecoder.GpioSimulator
 {
     public abstract class SimulatorDriverBase : GpioDriver
     {
@@ -19,16 +20,32 @@ namespace System.Device.Gpio
             NumberingScheme = numberingScheme;
         }
 
+#if SHIM_BUILD
         protected internal override int PinCount => 40;
+#else
+        protected override int PinCount => 40;
+#endif
 
+#if SHIM_BUILD
         protected internal override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => pinNumber;
+#else
+        protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => pinNumber;
+#endif
 
+#if SHIM_BUILD
         protected internal override void OpenPin(int pinNumber)
+#else
+        protected override void OpenPin(int pinNumber)
+#endif
         {
             OpenPin(pinNumber, PinMode.Input);
         }
 
+#if SHIM_BUILD
         protected internal virtual void OpenPin(int pinNumber, PinMode mode)
+#else
+        protected virtual void OpenPin(int pinNumber, PinMode mode)
+#endif
         {
             OpenPinInternal(pinNumber, mode);
             OpenPins[pinNumber] = mode;
@@ -36,14 +53,22 @@ namespace System.Device.Gpio
             PinValues[pinNumber] = defaultVal;
         }
 
+#if SHIM_BUILD
         protected internal override void ClosePin(int pinNumber)
+#else
+        protected override void ClosePin(int pinNumber)
+#endif
         {
             ClosePinInternal(pinNumber);
             OpenPins.TryRemove(pinNumber, out _);
             PinValues.TryRemove(pinNumber, out _);
         }
 
+#if SHIM_BUILD
         protected internal override void Write(int pinNumber, PinValue value)
+#else
+        protected override void Write(int pinNumber, PinValue value)
+#endif
         {
             if (!OpenPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
@@ -52,7 +77,11 @@ namespace System.Device.Gpio
             PinValues[pinNumber] = value;
         }
 
+#if SHIM_BUILD
         protected internal override PinValue Read(int pinNumber)
+#else
+        protected override PinValue Read(int pinNumber)
+#endif
         {
             if (!OpenPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
@@ -60,7 +89,11 @@ namespace System.Device.Gpio
             return ReadInternal(pinNumber);
         }
 
+#if SHIM_BUILD
         protected internal override void SetPinMode(int pinNumber, PinMode mode)
+#else
+        protected override void SetPinMode(int pinNumber, PinMode mode)
+#endif
         {
             if (!OpenPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
@@ -71,7 +104,11 @@ namespace System.Device.Gpio
             PinValues[pinNumber] = defaultVal;
         }
 
+#if SHIM_BUILD
         protected internal override PinMode GetPinMode(int pinNumber)
+#else
+        protected override PinMode GetPinMode(int pinNumber)
+#endif
         {
             if (!OpenPins.TryGetValue(pinNumber, out var mode))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
@@ -79,12 +116,20 @@ namespace System.Device.Gpio
             return mode;
         }
 
+#if SHIM_BUILD
         protected internal override bool IsPinOpen(int pinNumber)
+#else
+        public bool IsPinOpen(int pinNumber)
+#endif
         {
             return OpenPins.ContainsKey(pinNumber);
         }
 
+#if SHIM_BUILD
         protected internal override bool IsPinModeSupported(int pinNumber, PinMode mode)
+#else
+        protected override bool IsPinModeSupported(int pinNumber, PinMode mode)
+#endif
         {
             try
             {
@@ -100,13 +145,21 @@ namespace System.Device.Gpio
             }
         }
 
-        protected internal override void RegisterCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
+#if SHIM_BUILD
+        protected internal override void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
+#else
+        protected override void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
+#endif
         {
             var list = Callbacks.GetOrAdd(pinNumber, _ => new ConcurrentBag<(PinEventTypes, PinChangeEventHandler)>());
             list.Add((eventTypes, callback));
         }
 
-        protected internal override void UnregisterCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
+#if SHIM_BUILD
+        protected internal override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
+#else
+        protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
+#endif
         {
             if (Callbacks.TryGetValue(pinNumber, out var list))
             {
@@ -123,15 +176,11 @@ namespace System.Device.Gpio
             }
         }
 
-        protected internal override WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, TimeSpan timeout)
-        {
-            using (var cts = new CancellationTokenSource(timeout))
-            {
-                return WaitForEvent(pinNumber, eventTypes, cts.Token);
-            }
-        }
-
+#if SHIM_BUILD
         protected internal override WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, CancellationToken cancellationToken)
+#else
+        protected override WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, CancellationToken cancellationToken)
+#endif
         {
             var tcs = new TaskCompletionSource<PinEventTypes>();
             
@@ -140,7 +189,7 @@ namespace System.Device.Gpio
                 tcs.TrySetResult(args.ChangeType);
             };
 
-            RegisterCallbackForPinValueChangedEvent(pinNumber, eventTypes, tempHandler);
+            AddCallbackForPinValueChangedEvent(pinNumber, eventTypes, tempHandler);
 
             try
             {
@@ -173,7 +222,7 @@ namespace System.Device.Gpio
             }
             finally
             {
-                UnregisterCallbackForPinValueChangedEvent(pinNumber, tempHandler);
+                RemoveCallbackForPinValueChangedEvent(pinNumber, tempHandler);
             }
         }
 

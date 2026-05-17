@@ -6,11 +6,11 @@
     <LangVersion>latest</LangVersion>
     
     <!-- Package Metadata -->
-    <PackageId>DevDecoder.GpioSimulator.Common</PackageId>
+    <PackageId>DevDecoder.GpioSimulator.Drivers</PackageId>
     <Authors>Craig Dean</Authors>
     <Company>DevDecoder</Company>
-    <PackageDescription>Core state and simulation engine for DevDecoder's GPIO Simulator. Decouples pin mapping, modes, values, and transitions from presentation and transport layers.</PackageDescription>
-    <Description>Core state and simulation engine for DevDecoder's GPIO Simulator.</Description>
+    <PackageDescription>Standalone drivers (LocalDriver and WebAPIDriver) for DevDecoder's GPIO Simulator. Enables injecting the visual simulator or headless test driver directly into Microsoft's official System.Device.Gpio GpioController.</PackageDescription>
+    <Description>Standalone drivers for DevDecoder's GPIO Simulator.</Description>
     <Copyright>Copyright © 2026 Craig Dean</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/DevDecoder/GpioSimulator</PackageProjectUrl>
@@ -29,6 +29,17 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevDecoder.GpioSimulator.Common\DevDecoder.GpioSimulator.Common.csproj" />
+    <PackageReference Include="System.Device.Gpio" Version="3.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\System.Device.Gpio\SimulatorDriverBase.cs" Link="Drivers\SimulatorDriverBase.cs" />
+    <Compile Include="..\System.Device.Gpio\WebAPIDriver.cs" Link="Drivers\WebAPIDriver.cs" />
+    <Compile Include="..\System.Device.Gpio\BrowserLauncher.cs" Link="Drivers\BrowserLauncher.cs" />
   </ItemGroup>
 
   <ItemGroup>

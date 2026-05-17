@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace System.Device.Gpio
+namespace DevDecoder.GpioSimulator
 {
     public static class BrowserLauncher
     {

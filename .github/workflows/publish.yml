@@ -40,10 +40,26 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release --no-build --verbosity normal -p:ContinuousIntegrationBuild=true -p:DeterministicSourcePaths=true
         
-      - name: Publish
+      - name: Publish Common
+        uses: alirezanet/publish-nuget@v3.1.0
+        with:
+          PROJECT_FILE_PATH: src/DevDecoder.GpioSimulator.Common/DevDecoder.GpioSimulator.Common.csproj
+          NUGET_KEY: ${{secrets.NUGET_API_KEY_UNCLETHARGY}}
+          INCLUDE_SYMBOLS: true
+          VERSION_STATIC: ${{env.NBGV_Version}}
+
+      - name: Publish Core Shim
         uses: alirezanet/publish-nuget@v3.1.0
         with:
           PROJECT_FILE_PATH: src/System.Device.Gpio/System.Device.Gpio.csproj
+          NUGET_KEY: ${{secrets.NUGET_API_KEY_UNCLETHARGY}}
+          INCLUDE_SYMBOLS: true
+          VERSION_STATIC: ${{env.NBGV_Version}}
+
+      - name: Publish Local Driver
+        uses: alirezanet/publish-nuget@v3.1.0
+        with:
+          PROJECT_FILE_PATH: src/DevDecoder.GpioSimulator.Drivers/DevDecoder.GpioSimulator.Drivers.csproj
           NUGET_KEY: ${{secrets.NUGET_API_KEY_UNCLETHARGY}}
           INCLUDE_SYMBOLS: true
           VERSION_STATIC: ${{env.NBGV_Version}}

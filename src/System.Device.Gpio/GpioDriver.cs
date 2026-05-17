@@ -14,13 +14,9 @@ namespace System.Device.Gpio
         protected internal abstract void SetPinMode(int pinNumber, PinMode mode);
         protected internal abstract PinMode GetPinMode(int pinNumber);
         protected internal abstract bool IsPinModeSupported(int pinNumber, PinMode mode);
-        protected internal abstract void RegisterCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback);
-        protected internal abstract void UnregisterCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback);
-        protected internal abstract WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, TimeSpan timeout);
-        protected internal virtual WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
+        protected internal abstract void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback);
+        protected internal abstract void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback);
+        protected internal abstract WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, CancellationToken cancellationToken);
         protected internal virtual void Write(ReadOnlySpan<PinValuePair> pinValuePairs)
         {
             foreach (var pair in pinValuePairs)

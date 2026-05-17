@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <DefineConstants>$(DefineConstants);SHIM_BUILD</DefineConstants>
     <LangVersion>8.0</LangVersion>
     <Nullable>enable</Nullable>
     
@@ -63,6 +64,10 @@
       <Pack>True</Pack>
       <PackagePath>\</PackagePath>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\DevDecoder.GpioSimulator.Drivers\LocalDriver.cs" Link="Drivers\LocalDriver.cs" />
   </ItemGroup>
 
 </Project>

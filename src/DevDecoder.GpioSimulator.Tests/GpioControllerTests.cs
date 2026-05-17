@@ -215,6 +215,7 @@ namespace DevDecoder.GpioSimulator.Tests
             }
         }
 
+#if !OFFICIAL_GPIO
         [Fact]
         public void OpenPin_AlreadyOpen_ThrowsInvalidOperationException()
         {
@@ -229,7 +230,9 @@ namespace DevDecoder.GpioSimulator.Tests
                 Assert.Throws<InvalidOperationException>(() => controller.OpenPin(4, PinMode.Output));
             }
         }
+#endif
 
+#if !OFFICIAL_GPIO
         [Fact]
         public void IsValidPin_InvalidRanges_ReturnsFalse()
         {
@@ -244,5 +247,6 @@ namespace DevDecoder.GpioSimulator.Tests
                 Assert.False(controller.IsValidPin(28));
             }
         }
+#endif
     }
 }

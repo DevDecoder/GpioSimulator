@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Device.Gpio;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
@@ -8,7 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace System.Device.Gpio
+namespace DevDecoder.GpioSimulator
 {
     public class WebAPIDriver : SimulatorDriverBase
     {

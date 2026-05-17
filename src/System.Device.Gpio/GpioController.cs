@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using DevDecoder.GpioSimulator;
 
 namespace System.Device.Gpio
 {
@@ -51,13 +52,18 @@ namespace System.Device.Gpio
         public virtual bool IsPinModeSupported(int pinNumber, PinMode mode) => _driver.IsPinModeSupported(pinNumber, mode);
         
         public virtual void RegisterCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
-            => _driver.RegisterCallbackForPinValueChangedEvent(pinNumber, eventTypes, callback);
+            => _driver.AddCallbackForPinValueChangedEvent(pinNumber, eventTypes, callback);
             
         public virtual void UnregisterCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
-            => _driver.UnregisterCallbackForPinValueChangedEvent(pinNumber, callback);
+            => _driver.RemoveCallbackForPinValueChangedEvent(pinNumber, callback);
             
         public virtual WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, TimeSpan timeout)
-            => _driver.WaitForEvent(pinNumber, eventTypes, timeout);
+        {
+            using (var cts = new CancellationTokenSource(timeout))
+            {
+                return WaitForEvent(pinNumber, eventTypes, cts.Token);
+            }
+        }
             
         public virtual WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, CancellationToken cancellationToken)
             => _driver.WaitForEvent(pinNumber, eventTypes, cancellationToken);

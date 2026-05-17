@@ -10,8 +10,8 @@ namespace DevDecoder.GpioSimulator.Tests
         {
             PinValue val = PinValue.Low;
             
-            bool boolVal = val;
-            int intVal = val;
+            bool boolVal = (bool)val;
+            int intVal = (int)val;
 
             Assert.False(boolVal);
             Assert.Equal(0, intVal);
@@ -23,8 +23,8 @@ namespace DevDecoder.GpioSimulator.Tests
         {
             PinValue val = PinValue.High;
             
-            bool boolVal = val;
-            int intVal = val;
+            bool boolVal = (bool)val;
+            int intVal = (int)val;
 
             Assert.True(boolVal);
             Assert.Equal(1, intVal);
