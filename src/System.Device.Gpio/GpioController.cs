@@ -21,6 +21,49 @@ namespace System.Device.Gpio
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private static readonly HttpClient _httpClient = new HttpClient();
 
+        private void Log(string level, string message)
+        {
+            string formatted = $"[Controller] [{level}] {message}";
+            if (_wsClient != null && _wsClient.State == WebSocketState.Open)
+            {
+                try
+                {
+                    string escapedMessage = formatted.Replace("\"", "\\\"");
+                    var payload = $"{{\"action\":\"log\",\"pin\":0,\"value\":\"{escapedMessage}\",\"mode\":\"\"}}";
+                    var bytes = Encoding.UTF8.GetBytes(payload);
+                    _wsClient.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None)
+                             .GetAwaiter().GetResult();
+                    return;
+                }
+                catch
+                {
+                    // Fallback
+                }
+            }
+
+            // Fallback: Write directly to console standard error/out
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} GPIO Simulator] {formatted}");
+        }
+
+        private static void ReadStream(StreamReader reader)
+        {
+            try
+            {
+                while (!reader.EndOfStream)
+                {
+                    var line = reader.ReadLine();
+                    if (line != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine(line);
+                    }
+                }
+            }
+            catch
+            {
+                // Process exited or stream closed
+            }
+        }
+
         public virtual PinNumberingScheme NumberingScheme { get; }
         public virtual int PinCount => 40;
 
@@ -69,10 +112,18 @@ namespace System.Device.Gpio
                         Arguments = $"--roll-forward Major \"{dllPath}\" --urls {serverUrl}",
                         CreateNoWindow = true,
                         UseShellExecute = false,
-                        WorkingDirectory = Path.GetDirectoryName(dllPath)
+                        WorkingDirectory = Path.GetDirectoryName(dllPath),
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
                     };
                     startInfo.EnvironmentVariables["ASPNETCORE_ENVIRONMENT"] = "Development";
-                    Process.Start(startInfo);
+                    
+                    var process = Process.Start(startInfo);
+                    if (process != null)
+                    {
+                        _ = Task.Run(() => ReadStream(process.StandardOutput));
+                        _ = Task.Run(() => ReadStream(process.StandardError));
+                    }
                     
                     // Allow server spin up time
                     await Task.Delay(2000);
@@ -92,7 +143,7 @@ namespace System.Device.Gpio
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Pi Simulator] Client failed to connect to WebSocket: {ex.Message}");
+                Log("Error", $"Client failed to connect to WebSocket: {ex.Message}");
             }
         }
 

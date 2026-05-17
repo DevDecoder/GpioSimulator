@@ -44,9 +44,14 @@ var clients = new ConcurrentDictionary<Guid, (WebSocket Socket, string Type, str
 var pinStates = new ConcurrentDictionary<int, string>(); // Stores mode:value
 
 var mappingLock = new object();
-var activeBoardId = "raspberry_pi_5";
+var activeBoardId = "raspberry_pi_5_breakout";
 var activePhysToLog = new Dictionary<int, int>();
 var activeLogToPhys = new Dictionary<int, int>();
+
+void Log(string message)
+{
+    Console.WriteLine($"[{DateTime.Now:HH:mm:ss} GPIO Simulator] {message}");
+}
 
 void LoadBoardMapping(string boardId)
 {
@@ -55,7 +60,7 @@ void LoadBoardMapping(string boardId)
         string gscPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "components", $"{boardId}.gsc");
         if (!File.Exists(gscPath))
         {
-            Console.WriteLine($"[Pi Simulator Web] GSC file not found: {gscPath}");
+            Log($"GSC file not found: {gscPath}");
             return;
         }
 
@@ -88,15 +93,15 @@ void LoadBoardMapping(string boardId)
             activePhysToLog = tempPhysToLog;
             activeLogToPhys = tempLogToPhys;
         }
-        Console.WriteLine($"[Pi Simulator Web] Loaded board mapping for: {boardId} ({tempPhysToLog.Count} pins)");
+        Log($"Loaded board mapping for: {boardId} ({tempPhysToLog.Count} pins)");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[Pi Simulator Web] Error loading mapping for {boardId}: {ex.Message}");
+        Log($"Error loading mapping for {boardId}: {ex.Message}");
     }
 }
 
-LoadBoardMapping("raspberry_pi_5");
+LoadBoardMapping("raspberry_pi_5_breakout");
 
 CancellationTokenSource? shutdownCts = null;
 var shutdownLock = new object();
@@ -113,7 +118,7 @@ void StartShutdownTimer(int delaySeconds)
         {
             if (!t.IsCanceled)
             {
-                Console.WriteLine("[Pi Simulator Web] No active connections. Shutting down server...");
+                Log("No active connections. Shutting down server...");
                 Environment.Exit(0);
             }
         }, TaskContinuationOptions.ExecuteSynchronously);
@@ -140,7 +145,7 @@ app.MapPost("/api/board/active", (HttpContext context) =>
     {
         return Results.BadRequest("Missing boardId parameter");
     }
-    Console.WriteLine($"[Pi Simulator Web] Setting active board layout to: {boardId}");
+    Log($"Setting active board layout to: {boardId}");
     LoadBoardMapping(boardId);
     return Results.Ok();
 });
@@ -168,9 +173,9 @@ app.Use(async (context, next) =>
             if (string.IsNullOrEmpty(clientType)) clientType = "ui";
 
             var clientScheme = context.Request.Query["scheme"].ToString();
-            if (string.IsNullOrEmpty(clientScheme)) clientScheme = "Logical";
+            if (string.IsNullOrEmpty(clientScheme)) clientScheme = "Board";
 
-            Console.WriteLine($"[Pi Simulator Web] Client connected: {clientId} (Type: {clientType}, Scheme: {clientScheme})");
+            Log($"Client connected: {clientId} (Type: {clientType}, Scheme: {clientScheme})");
 
             using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
             clients.TryAdd(clientId, (webSocket, clientType, clientScheme));
@@ -186,13 +191,13 @@ app.Use(async (context, next) =>
                 foreach (var kvp in pinStates)
                 {
                     int targetPin = kvp.Key;
-                    if (clientType == "controller" && clientScheme == "Board")
+                    if (clientScheme == "Logical")
                     {
                         lock (mappingLock)
                         {
-                            if (activeLogToPhys.TryGetValue(kvp.Key, out int phys))
+                            if (activePhysToLog.TryGetValue(kvp.Key, out int log))
                             {
-                                targetPin = phys;
+                                targetPin = log;
                             }
                         }
                     }
@@ -212,33 +217,31 @@ app.Use(async (context, next) =>
                         if (node != null && node["pin"] != null)
                         {
                             int origPin = node["pin"]!.GetValue<int>();
-                            int targetPin = origPin;
                             
-                            int logPin = origPin;
-                            if (clientType == "controller" && clientScheme == "Board")
+                            // Map incoming pin to a physical pin (Board numbering scheme)
+                            int physPin = origPin;
+                            if (clientScheme == "Logical")
                             {
                                 lock (mappingLock)
                                 {
-                                    if (activePhysToLog.TryGetValue(origPin, out int log))
+                                    if (activeLogToPhys.TryGetValue(origPin, out int phys))
                                     {
-                                        logPin = log;
+                                        physPin = phys;
                                     }
                                 }
                             }
                             
-                            if (destType == "controller" && destScheme == "Board")
+                            // Map physical pin to destination scheme
+                            int targetPin = physPin;
+                            if (destScheme == "Logical")
                             {
                                 lock (mappingLock)
                                 {
-                                    if (activeLogToPhys.TryGetValue(logPin, out int phys))
+                                    if (activePhysToLog.TryGetValue(physPin, out int log))
                                     {
-                                        targetPin = phys;
+                                        targetPin = log;
                                     }
                                 }
-                            }
-                            else
-                            {
-                                targetPin = logPin;
                             }
                             
                             node["pin"] = targetPin;
@@ -268,27 +271,34 @@ app.Use(async (context, next) =>
                         var action = actionProp.GetString();
                         var pin = root.GetProperty("pin").GetInt32();
                         
-                        int logicalPin = pin;
-                        if (clientType == "controller" && clientScheme == "Board")
+                        int physPin = pin;
+                        if (clientScheme == "Logical")
                         {
                             lock (mappingLock)
                             {
-                                if (activePhysToLog.TryGetValue(pin, out int log))
+                                if (activeLogToPhys.TryGetValue(pin, out int phys))
                                 {
-                                    logicalPin = log;
+                                    physPin = phys;
                                 }
                             }
                         }
 
-                        if (action == "write" || action == "read")
+                        if (action == "log")
+                        {
+                            var val = root.GetProperty("value").GetString() ?? "";
+                            Log(val);
+                        }
+                        else if (action == "write" || action == "read")
                         {
                             var val = root.GetProperty("value").GetString() ?? "Low";
-                            pinStates.AddOrUpdate(logicalPin, $"Unknown:{val}", (k, old) => $"{old.Split(':')[0]}:{val}");
+                            pinStates.AddOrUpdate(physPin, $"Unknown:{val}", (k, old) => $"{old.Split(':')[0]}:{val}");
+                            Log($"Physical Pin {physPin} state set to: {val}");
                         }
                         else if (action == "mode")
                         {
                             var mode = root.GetProperty("mode").GetString() ?? "Input";
-                            pinStates.AddOrUpdate(logicalPin, $"{mode}:Low", (k, old) => $"{mode}:{old.Split(':')[1]}");
+                            pinStates.AddOrUpdate(physPin, $"{mode}:Low", (k, old) => $"{mode}:{old.Split(':')[1]}");
+                            Log($"Physical Pin {physPin} mode configured: {mode}");
                         }
                     }
 
@@ -306,13 +316,33 @@ app.Use(async (context, next) =>
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Pi Simulator Web] Error in client {clientId} loop: {ex.Message}");
+                Log($"Error in client {clientId} loop: {ex.Message}");
             }
             finally
             {
                 clients.TryRemove(clientId, out _);
                 int activeControllers = clients.Values.Count(c => c.Type == "controller");
-                Console.WriteLine($"[Pi Simulator Web] Client disconnected: {clientId} (Type: {clientType}). Remaining controllers: {activeControllers}");
+                Log($"Client disconnected: {clientId} (Type: {clientType}). Remaining controllers: {activeControllers}");
+                
+                if (clientType == "controller")
+                {
+                    pinStates.Clear();
+                    
+                    var resetMsg = "{\"action\":\"reset\"}";
+                    var resetBytes = Encoding.UTF8.GetBytes(resetMsg);
+                    foreach (var client in clients.Values)
+                    {
+                        if (client.Socket.State == WebSocketState.Open)
+                        {
+                            try
+                            {
+                                await client.Socket.SendAsync(new ArraySegment<byte>(resetBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
                 if (activeControllers == 0)
                 {
                     StartShutdownTimer(3); // Shutdown after 3 seconds of no active controller

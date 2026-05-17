@@ -37,8 +37,27 @@ By resolving pin translation at the WebSocket network boundary rather than hardc
 
 ---
 
-## 3. Benefits
+## 4. Architectural Decision Record (ADR): Defaulting to Physical Board Pin Numbers
 
-1. **Zero Client Overhead**: No complex dictionary search or mapping inside `System.Device.Gpio`.
-2. **Standard-Compliant**: No custom C# helpers needed, avoiding any namespace bloat or deviations.
-3. **Cross-Board Support**: Seamlessly supports Arduino Uno, Raspberry Pi 5, or custom boards loaded dynamically in the browser.
+### 4.1. Status
+**Accepted & Implemented** (May 17, 2026)
+
+### 4.2. Context
+The browser-based visualizer shows the physical pin locations (1-40) on the breakout board or header, which is the most intuitive and robust way for developers to interact with the simulated hardware. 
+
+Previously, the Web Server used **Logical** pin numbering (BCM/GPIO IDs) as its internal storage representation and keying mechanism. This meant that:
+- Server console logs reported logical GPIO pin transitions (e.g., configuring GPIO 2 or writing to GPIO 3).
+- Visual-to-console mapping was confusing because developers had to mentally map physical pins shown in the browser to logical IDs logged in the terminal.
+
+### 4.3. Decision
+Standardize on the physical **Board Numbering (Physical)** scheme as the canonical internal keying mechanism in the Web Server and the default communication scheme for the Web UI:
+1. When clients connect without explicitly providing a scheme (e.g., the browser UI), they default to `"Board"` numbering.
+2. The internal `pinStates` dictionary keys represent physical pin numbers (1-40) instead of logical GPIO pins.
+3. Server-side terminal logs print physical board pin numbers directly (e.g., `Physical Pin 5 state set to: High`), aligning 100% with the visual markers in the browser.
+4. Symmetrical network translation maps to/from logical coordinates at the WebSocket boundary when standard-compliant `Logical` clients (such as standard consumer application controllers) connect.
+
+### 4.4. Consequences
+- **Improved Usability**: Developers see immediate, 1:1 correlation between visual board sockets in the UI and physical pin numbers reported in both server and UI logs.
+- **Robustness**: Pin states are anchored to their fixed physical locations (which are board-dependent but physically static) rather than changing with dynamic logic configurations.
+- **API Compatibility**: High-fidelity compatibility with Microsoft's `System.Device.Gpio` (which defaults to logical numbering) is fully preserved at the WebSocket boundary.
+

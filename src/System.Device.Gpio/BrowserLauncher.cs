@@ -37,12 +37,12 @@ namespace System.Device.Gpio
                     }
                     catch
                     {
-                        Console.WriteLine($"[Pi Simulator] Please open your browser and navigate to: {url}");
+                        Console.WriteLine($"[{DateTime.Now:HH:mm:ss} GPIO Simulator] Please open your browser and navigate to: {url}");
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"[Pi Simulator] Please open your browser and navigate to: {url}");
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss} GPIO Simulator] Please open your browser and navigate to: {url}");
                 }
             }
         }

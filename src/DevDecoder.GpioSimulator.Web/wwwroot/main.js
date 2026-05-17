@@ -1,6 +1,6 @@
 let activeSchema = null;
 let ws = null;
-const pinsStateMap = {}; // Maps logicalPin -> { mode: "Input"|"Output"|"None", value: "High"|"Low" }
+const pinsStateMap = {}; // Maps physicalPin -> { mode: "Input"|"Output"|"None", value: "High"|"Low" }
 let activeTooltipPin = null; // Tracks physical pin currently shown in tooltip
 
 const boardSelect = document.getElementById('board-select');
@@ -115,23 +115,21 @@ function renderBoard() {
         
         boardVisual.appendChild(hotspot);
         
-        // If it's logical, update its active visualization
-        if (pin.logical !== null) {
-            updatePinVisuals(pin.logical);
-        }
+        // Update its active visualization
+        updatePinVisuals(pin.physical);
     });
     
     log(`Rendered ${activeSchema.displayName} vector board successfully.`);
 }
 
-function updatePinVisuals(logicalPin) {
-    const pinDef = activeSchema?.pins.find(p => p.logical === logicalPin);
+function updatePinVisuals(physicalPin) {
+    const pinDef = activeSchema?.pins.find(p => p.physical === physicalPin);
     if (!pinDef) return;
     
-    const hotspot = boardVisual.querySelector(`.pin-phys-${pinDef.physical}`);
+    const hotspot = boardVisual.querySelector(`.pin-phys-${physicalPin}`);
     if (!hotspot) return;
     
-    const state = pinsStateMap[logicalPin] || { mode: "None", value: "Low" };
+    const state = pinsStateMap[physicalPin] || { mode: "None", value: "Low" };
     
     // Apply styling based on active logic level
     if (state.value === "High") {
@@ -151,7 +149,7 @@ function updatePinVisuals(logicalPin) {
     }
     
     // Update tooltip if currently open for this pin
-    if (activeTooltipPin === pinDef.physical) {
+    if (activeTooltipPin === physicalPin) {
         refreshTooltipContent(pinDef, hotspot);
     }
 }
@@ -178,7 +176,7 @@ function showTooltip(pin, anchorEl) {
 }
 
 function refreshTooltipContent(pin, anchorEl) {
-    const state = pinsStateMap[pin.logical] || { mode: "None", value: "Low" };
+    const state = pinsStateMap[pin.physical] || { mode: "None", value: "Low" };
     
     let logicalStr = "N/A (Power / GND)";
     let controlSection = "";
@@ -240,13 +238,13 @@ function refreshTooltipContent(pin, anchorEl) {
         if (toggle) {
             toggle.onchange = (e) => {
                 const newState = e.target.checked ? "High" : "Low";
-                pinsStateMap[pin.logical].value = newState;
+                pinsStateMap[pin.physical].value = newState;
                 
-                log(`Input manually driven HIGH on Pin ${pin.logical}: ${newState}`);
-                sendPinState(pin.logical, "read", newState);
+                log(`Input manually driven to ${newState} on Pin ${pin.physical}`);
+                sendPinState(pin.physical, "read", newState);
                 
                 // Immediately update board visuals locally
-                updatePinVisuals(pin.logical);
+                updatePinVisuals(pin.physical);
             };
         }
     }
@@ -270,7 +268,21 @@ function setupWebSocket() {
         try {
             const msg = JSON.parse(event.data);
             
-            if (msg.action === "write") {
+            if (msg.action === "reset") {
+                for (const key in pinsStateMap) {
+                    delete pinsStateMap[key];
+                }
+                if (activeSchema && activeSchema.pins) {
+                    activeSchema.pins.forEach(pin => {
+                        updatePinVisuals(pin.physical);
+                    });
+                }
+                log("Simulator state reset.");
+            }
+            else if (msg.action === "log") {
+                log(msg.value);
+            }
+            else if (msg.action === "write") {
                 pinsStateMap[msg.pin] = pinsStateMap[msg.pin] || { mode: "Output", value: "Low" };
                 pinsStateMap[msg.pin].value = msg.value;
                 updatePinVisuals(msg.pin);
@@ -311,4 +323,4 @@ function sendPinState(pin, action, val) {
 boardSelect.onchange = (e) => loadBoard(e.target.value);
 
 // Initialize
-loadBoard('raspberry_pi_5').then(setupWebSocket);
+loadBoard('raspberry_pi_5_breakout').then(setupWebSocket);
