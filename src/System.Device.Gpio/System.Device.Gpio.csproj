@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>8.0</LangVersion>
+    <Nullable>enable</Nullable>
     
     <!-- Package Metadata -->
     <PackageId>DevDecoder.GpioSimulator</PackageId>
@@ -48,6 +50,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\DevDecoder.GpioSimulator.Common\DevDecoder.GpioSimulator.Common.csproj" />
     <ProjectReference Include="..\DevDecoder.GpioSimulator.Web\DevDecoder.GpioSimulator.Web.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 

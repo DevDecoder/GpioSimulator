@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/DevDecoder.GpioSimulator.Common/DevDecoder.GpioSimulator.Common.csproj" />
+    <Project Path="src/DevDecoder.GpioSimulator.Local/DevDecoder.GpioSimulator.Local.csproj" />
     <Project Path="src/DevDecoder.GpioSimulator.Sample/DevDecoder.GpioSimulator.Sample.csproj" />
     <Project Path="src/DevDecoder.GpioSimulator.Tests/DevDecoder.GpioSimulator.Tests.csproj" />
     <Project Path="src/DevDecoder.GpioSimulator.Web/DevDecoder.GpioSimulator.Web.csproj" />

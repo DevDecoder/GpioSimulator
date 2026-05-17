@@ -8,7 +8,7 @@ In standard `System.Device.Gpio` architectures, a central `GpioController` inter
 - Create a distinct **`LocalDriver`** class that manages states in-memory without any WebSocket or web server dependencies, returning mock outputs.
 - This will allow developers/tests to run `new GpioController(new LocalDriver())` when they do not require or care about the visual Web UI, making unit/integration testing fully offline, fast, and robust while reusing the exact same API footprint.
 
-To support this the core logic should be moved into a DevDecoder.GpioSimulator.Common library, included in both the DevDecoder.GpioSimulator.Web library and a new DevDecoder.GpioSimulator.Local library.
+œTo support this the core logic should be moved into a DevDecoder.GpioSimulator.Common library, included in both the DevDecoder.GpioSimulator.Web library and a new DevDecoder.GpioSimulator.Local library (implementing `LocalDriver`). We should implement the `WebAPIDriver` directly in our `System.Device.Gpio` class library (as the default implementation), as this won't need access to the common library (it will talk to the Web Server, the same way our current implementation does).
 
 ## API and Eventing for Local Driver
 

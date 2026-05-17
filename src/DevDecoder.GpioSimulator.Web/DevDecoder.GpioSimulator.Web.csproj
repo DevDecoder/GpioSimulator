@@ -14,4 +14,8 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\DevDecoder.GpioSimulator.Common\DevDecoder.GpioSimulator.Common.csproj" />
+  </ItemGroup>
+
 </Project>

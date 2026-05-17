@@ -23,7 +23,8 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void GpioController_DefaultsToLogicalSchemeAndSupportsPinCount()
         {
-            using (var controller = new GpioController())
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 Assert.Equal(PinNumberingScheme.Logical, controller.NumberingScheme);
                 Assert.Equal(40, controller.PinCount);
@@ -33,7 +34,8 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void GpioController_SupportsCustomNumberingScheme()
         {
-            using (var controller = new GpioController(PinNumberingScheme.Board))
+            var driver = new LocalDriver(PinNumberingScheme.Board);
+            using (var controller = new GpioController(PinNumberingScheme.Board, driver))
             {
                 Assert.Equal(PinNumberingScheme.Board, controller.NumberingScheme);
             }
@@ -42,7 +44,8 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void OpenPin_ClosePin_GetPinMode_BehaveCorrectly()
         {
-            using (var controller = new GpioController())
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 Assert.False(controller.IsPinOpen(5));
                 
@@ -59,7 +62,8 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void MultiPinWriteAndRead_Spans_WorkCorrectly()
         {
-            using (var controller = new GpioController())
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 controller.OpenPin(10, PinMode.Output);
                 controller.OpenPin(11, PinMode.Output);
@@ -95,9 +99,10 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void EdgeCallbacks_FireSuccessfullyOnStateTransitions()
         {
-            using (var controller = new GpioController())
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
-                controller.OpenPin(4, PinMode.Output);
+                controller.OpenPin(4, PinMode.Input);
 
                 int risingCount = 0;
                 int fallingCount = 0;
@@ -116,11 +121,19 @@ namespace DevDecoder.GpioSimulator.Tests
 
                 controller.RegisterCallbackForPinValueChangedEvent(4, PinEventTypes.Rising | PinEventTypes.Falling, callback);
 
-                // Transition Low -> High (Rising)
-                controller.Write(4, PinValue.High);
-                // Triggering transitions manually since we are offline in memory
-                // To emulate the WebSocket message receiving transition:
-                // We test that our event subscription structure fires correctly
+                // Act - Simulate physical high external stimulus (button press)
+                driver.SetPinValueByTest(4, PinValue.High);
+                Thread.Sleep(20);
+
+                Assert.Equal(1, risingCount);
+                Assert.Equal(0, fallingCount);
+
+                // Transition High -> Low (Falling)
+                driver.SetPinValueByTest(4, PinValue.Low);
+                Thread.Sleep(20);
+
+                Assert.Equal(1, risingCount);
+                Assert.Equal(1, fallingCount);
                 
                 // Let's also verify that we can unregister the callback cleanly
                 controller.UnregisterCallbackForPinValueChangedEvent(4, callback);
@@ -130,7 +143,8 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void WaitForEvent_TimesOut_Correctly()
         {
-            using (var controller = new GpioController())
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 controller.OpenPin(12, PinMode.Input);
 
@@ -143,9 +157,34 @@ namespace DevDecoder.GpioSimulator.Tests
         }
 
         [Fact]
+        public void WaitForEvent_BlocksUntilSignalChangeOccurs()
+        {
+            // Arrange
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
+            {
+                controller.OpenPin(4, PinMode.Input);
+
+                // Act & Assert
+                // Start trigger task
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    Thread.Sleep(100);
+                    driver.SetPinValueByTest(4, PinValue.High);
+                });
+
+                var result = controller.WaitForEvent(4, PinEventTypes.Rising, TimeSpan.FromSeconds(2));
+
+                Assert.False(result.TimedOut);
+                Assert.Equal(PinEventTypes.Rising, result.EventTypes);
+            }
+        }
+
+        [Fact]
         public void OpenPin_InputPullUpAndPullDown_HaveCorrectDefaultStates()
         {
-            using (var controller = new GpioController())
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 controller.OpenPin(14, PinMode.InputPullUp);
                 Assert.Equal(PinMode.InputPullUp, controller.GetPinMode(14));
@@ -164,7 +203,8 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void IsPinModeSupported_ReturnsCorrectValues()
         {
-            using (var controller = new GpioController())
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 Assert.True(controller.IsPinModeSupported(5, PinMode.Input));
                 Assert.True(controller.IsPinModeSupported(5, PinMode.Output));
@@ -178,7 +218,8 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void OpenPin_AlreadyOpen_ThrowsInvalidOperationException()
         {
-            using (var controller = new GpioController())
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 controller.OpenPin(4, PinMode.Input);
                 Assert.True(controller.IsPinOpen(4));
@@ -192,12 +233,14 @@ namespace DevDecoder.GpioSimulator.Tests
         [Fact]
         public void IsValidPin_InvalidRanges_ReturnsFalse()
         {
-            using (var controller = new GpioController(PinNumberingScheme.Logical))
+            var driver = new LocalDriver(PinNumberingScheme.Logical);
+            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 Assert.True(controller.IsValidPin(5));
-                Assert.True(controller.IsValidPin(0));
+                Assert.True(controller.IsValidPin(2));
                 Assert.True(controller.IsValidPin(27));
                 Assert.False(controller.IsValidPin(-1));
+                Assert.False(controller.IsValidPin(0));
                 Assert.False(controller.IsValidPin(28));
             }
         }
