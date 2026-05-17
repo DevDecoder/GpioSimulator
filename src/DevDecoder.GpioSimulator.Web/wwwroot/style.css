@@ -11,6 +11,8 @@
     --power-color: #ff3838;
     --v3-color: #ff9f43;
     --gnd-color: #576574;
+    --input-color: #3498db;
+    --output-color: #9b59b6;
 }
 
 body {
@@ -154,8 +156,8 @@ main {
 .pin-hotspot:hover {
     transform: scale(1.3);
     z-index: 20;
-    border-color: #fff;
-    box-shadow: 0 0 12px #fff;
+    border-color: #fff !important;
+    box-shadow: 0 0 12px #fff !important;
 }
 
 /* Glowing Indicator LED on high signals */
@@ -164,6 +166,30 @@ main {
     border-color: #a3ff7a !important;
     color: #000 !important;
     box-shadow: 0 0 15px var(--led-on), inset 0 1px 3px rgba(255,255,255,0.8);
+}
+
+/* GPIO Input/Output Mode Indications */
+.pin-hotspot.gpio.mode-input {
+    border-style: dashed;
+    border-color: var(--input-color);
+    box-shadow: inset 0 0 6px rgba(52, 152, 219, 0.4), 0 2px 5px rgba(0,0,0,0.5);
+}
+
+.pin-hotspot.gpio.mode-output {
+    border-style: solid;
+    border-color: var(--output-color);
+    box-shadow: inset 0 0 6px rgba(155, 89, 182, 0.4), 0 2px 5px rgba(0,0,0,0.5);
+}
+
+/* Maintain border style distinction when glowing green (High state) */
+.pin-hotspot.active.mode-input {
+    border-style: dashed !important;
+    border-color: #a3ff7a !important;
+}
+
+.pin-hotspot.active.mode-output {
+    border-style: solid !important;
+    border-color: #a3ff7a !important;
 }
 
 /* Premium Floating Tooltip / Micro-Overlay */
