@@ -297,8 +297,36 @@ app.Use(async (context, next) =>
                         else if (action == "mode")
                         {
                             var mode = root.GetProperty("mode").GetString() ?? "Input";
-                            pinStates.AddOrUpdate(physPin, $"{mode}:Low", (k, old) => $"{mode}:{old.Split(':')[1]}");
-                            Log($"Physical Pin {physPin} mode configured: {mode}");
+                            var val = mode == "InputPullUp" ? "High" : "Low";
+                            pinStates.AddOrUpdate(physPin, $"{mode}:{val}", (k, old) => $"{mode}:{val}");
+                            Log($"Physical Pin {physPin} mode configured: {mode} (Default value: {val})");
+
+                            // Respond back to the sender socket with the updated pin value
+                            var responseMsg = JsonSerializer.Serialize(new { action = "write", pin = pin, value = val });
+                            var responseBytes = Encoding.UTF8.GetBytes(responseMsg);
+                            await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+
+                            // Also broadcast the value change to all other connected clients
+                            foreach (var client in clients)
+                            {
+                                if (client.Value.Socket.State == WebSocketState.Open && client.Value.Socket != webSocket)
+                                {
+                                    int targetPin = physPin;
+                                    if (client.Value.Scheme == "Logical")
+                                    {
+                                        lock (mappingLock)
+                                        {
+                                            if (activePhysToLog.TryGetValue(physPin, out int log))
+                                            {
+                                                targetPin = log;
+                                            }
+                                        }
+                                    }
+                                    var broadcastMsg = JsonSerializer.Serialize(new { action = "write", pin = targetPin, value = val });
+                                    var broadcastBytes = Encoding.UTF8.GetBytes(broadcastMsg);
+                                    await client.Value.Socket.SendAsync(new ArraySegment<byte>(broadcastBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                                }
+                            }
                         }
                         else if (action == "close")
                         {

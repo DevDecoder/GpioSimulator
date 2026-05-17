@@ -183,14 +183,30 @@ namespace DevDecoder.GpioSimulator.Sample
                                 if (parts.Length < 3)
                                 {
                                     Console.ForegroundColor = ConsoleColor.Red;
-                                    Console.WriteLine("Error: Please specify pin and mode. Syntax: open <pin> <in|out>");
+                                    Console.WriteLine("Error: Please specify pin and mode. Syntax: open <pin> <in|out|pullup|pulldown>");
                                     Console.ResetColor();
                                     break;
                                 }
                                 if (int.TryParse(parts[1], out int openPin))
                                 {
                                     string modeStr = parts[2].ToLower();
-                                    PinMode mode = modeStr == "in" || modeStr == "input" ? PinMode.Input : PinMode.Output;
+                                    PinMode mode;
+                                    if (modeStr == "out" || modeStr == "output")
+                                    {
+                                        mode = PinMode.Output;
+                                    }
+                                    else if (modeStr == "pullup" || modeStr == "inputpullup" || modeStr == "pu")
+                                    {
+                                        mode = PinMode.InputPullUp;
+                                    }
+                                    else if (modeStr == "pulldown" || modeStr == "inputpulldown" || modeStr == "pd")
+                                    {
+                                        mode = PinMode.InputPullDown;
+                                    }
+                                    else
+                                    {
+                                        mode = PinMode.Input;
+                                    }
                                     OpenPin(controller, openPin, mode);
                                     Console.WriteLine($"Successfully opened Pin {openPin} as {mode}.");
                                 }
@@ -325,15 +341,15 @@ namespace DevDecoder.GpioSimulator.Sample
         private static void PrintHelp()
         {
             Console.WriteLine("\nAvailable Interactive Commands:");
-            Console.WriteLine("  open <pin> <in|out>      - Open a pin with specified mode (e.g. open 7 out)");
-            Console.WriteLine("  close <pin>              - Close an open pin");
-            Console.WriteLine("  write <pin> <1|0|h|l>    - Write High/Low to an output pin (e.g. write 3 1)");
-            Console.WriteLine("  read <pin>               - Read the current value of an open pin");
-            Console.WriteLine("  scheme <logical|board>   - Switch dynamic pin numbering scheme (e.g. scheme board)");
-            Console.WriteLine("  schema <logical|board>   - Alias for scheme command");
-            Console.WriteLine("  status                   - Display status of all currently opened pins");
-            Console.WriteLine("  help                     - Show this guide");
-            Console.WriteLine("  exit | quit | q          - Terminate the simulation program");
+            Console.WriteLine("  open <pin> <in|out|pullup|pulldown>  - Open a pin with specified mode");
+            Console.WriteLine("  close <pin>                          - Close an open pin");
+            Console.WriteLine("  write <pin> <1|0|h|l>                - Write High/Low to an output pin (e.g. write 3 1)");
+            Console.WriteLine("  read <pin>                           - Read the current value of an open pin");
+            Console.WriteLine("  scheme <logical|board>               - Switch dynamic pin numbering scheme (e.g. scheme board)");
+            Console.WriteLine("  schema <logical|board>               - Alias for scheme command");
+            Console.WriteLine("  status                               - Display status of all currently opened pins");
+            Console.WriteLine("  help                                 - Show this guide");
+            Console.WriteLine("  exit | quit | q                      - Terminate the simulation program");
         }
 
         private static void PrintPinsStatus(GpioController controller)
@@ -381,7 +397,7 @@ namespace DevDecoder.GpioSimulator.Sample
                     {
                         foreach (var kvp in _pins)
                         {
-                            if (kvp.Value == PinMode.Input)
+                            if (kvp.Value == PinMode.Input || kvp.Value == PinMode.InputPullUp || kvp.Value == PinMode.InputPullDown)
                             {
                                 openInputPins.Add(kvp.Key);
                             }

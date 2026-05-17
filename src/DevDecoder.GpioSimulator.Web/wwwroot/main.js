@@ -183,7 +183,7 @@ function renderBoard() {
 
         hotspot.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (activeTool === 'pointer') {
+            if (activeTool === 'pointer' || activeTool === 'move') {
                 showTooltip(pin, hotspot);
             } else if (activeTool === 'delete') {
                 log(`Interacted with Pin ${pin.physical} with Delete Tool.`);
@@ -259,10 +259,16 @@ function updatePinVisuals(physicalPin) {
         hotspot.classList.remove("active");
     }
     
-    hotspot.classList.remove("mode-input", "mode-output", "mode-none");
-    if (state.mode === "Input") {
+    hotspot.classList.remove("mode-input", "mode-output", "mode-none", "mode-inputpullup", "mode-inputpulldown");
+    const modeLower = state.mode ? state.mode.toLowerCase() : "none";
+    if (modeLower.startsWith("input")) {
         hotspot.classList.add("mode-input");
-    } else if (state.mode === "Output") {
+        if (modeLower === "inputpullup") {
+            hotspot.classList.add("mode-inputpullup");
+        } else if (modeLower === "inputpulldown") {
+            hotspot.classList.add("mode-inputpulldown");
+        }
+    } else if (modeLower === "output") {
         hotspot.classList.add("mode-output");
     } else {
         hotspot.classList.add("mode-none");
@@ -299,22 +305,52 @@ function refreshTooltipContent(pin, anchorEl) {
     
     if (pin.logical !== null) {
         logicalStr = `GPIO ${pin.logical}`;
-        const isInput = state.mode.toLowerCase() === "input";
-        const checkedAttr = state.value === "High" ? "checked" : "";
-        const disabledAttr = !isInput ? "disabled" : "";
+        const modeLower = state.mode ? state.mode.toLowerCase() : "";
         
-        controlSection = `
-            <div class="tooltip-control">
-                <label class="switch ${!isInput ? 'disabled' : ''}">
-                    <input type="checkbox" id="tooltip-state-toggle" ${checkedAttr} ${disabledAttr}>
-                    <span class="slider round"></span>
-                </label>
-                <div class="control-text">
-                    <span class="control-label">Manual Input Driver</span>
-                    <span class="control-sub">${isInput ? 'Toggle HIGH/LOW' : 'Output governed by code'}</span>
+        if (modeLower === "input") {
+            const checkedAttr = state.value === "High" ? "checked" : "";
+            controlSection = `
+                <div class="tooltip-control">
+                    <label class="switch">
+                        <input type="checkbox" id="tooltip-state-toggle" ${checkedAttr}>
+                        <span class="slider round"></span>
+                    </label>
+                    <div class="control-text">
+                        <span class="control-label">Manual Input Driver</span>
+                        <span class="control-sub">Toggle HIGH/LOW</span>
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        } else if (modeLower === "inputpulldown") {
+            controlSection = `
+                <div class="tooltip-control">
+                    <button class="push-btn" id="tooltip-state-push">Drive HIGH</button>
+                    <div class="control-text">
+                        <span class="control-label">Pull-Down Push Button</span>
+                        <span class="control-sub">Hold to drive HIGH (3.3V/5V)</span>
+                    </div>
+                </div>
+            `;
+        } else if (modeLower === "inputpullup") {
+            controlSection = `
+                <div class="tooltip-control">
+                    <button class="push-btn" id="tooltip-state-push">Drive LOW</button>
+                    <div class="control-text">
+                        <span class="control-label">Pull-Up Push Button</span>
+                        <span class="control-sub">Hold to drive LOW (0V)</span>
+                    </div>
+                </div>
+            `;
+        } else {
+            controlSection = `
+                <div class="tooltip-control disabled">
+                    <div class="control-text">
+                        <span class="control-label">Governed by Controller</span>
+                        <span class="control-sub">${modeLower === 'output' ? 'Output governed by code' : 'Pin mode not configured'}</span>
+                    </div>
+                </div>
+            `;
+        }
     }
     
     tooltip.innerHTML = `
@@ -333,13 +369,13 @@ function refreshTooltipContent(pin, anchorEl) {
             </div>
             <div class="tooltip-info-row">
                 <span class="info-label">Current Mode:</span>
-                <span class="info-val badge mode-${state.mode.toLowerCase()}">${state.mode}</span>
+                <span class="info-val badge mode-${state.mode ? state.mode.toLowerCase() : 'none'}">${state.mode || 'None'}</span>
             </div>
             <div class="tooltip-info-row">
                 <span class="info-label">Logic Level:</span>
-                <span class="info-val state-indicator ${state.value.toLowerCase()}">
+                <span class="info-val state-indicator ${state.value ? state.value.toLowerCase() : 'low'}">
                     <span class="state-dot"></span>
-                    ${state.value}
+                    ${state.value || 'Low'}
                 </span>
             </div>
             ${controlSection}
@@ -359,6 +395,36 @@ function refreshTooltipContent(pin, anchorEl) {
                 sendPinState(pin.physical, "read", newState);
                 updatePinVisuals(pin.physical);
             };
+        }
+        
+        const pushBtn = tooltip.querySelector('#tooltip-state-push');
+        if (pushBtn) {
+            const modeLower = state.mode ? state.mode.toLowerCase() : "";
+            const defaultState = modeLower === "inputpullup" ? "High" : "Low";
+            const pressedState = modeLower === "inputpullup" ? "Low" : "High";
+            
+            const handlePress = (e) => {
+                e.preventDefault();
+                pinsStateMap[pin.physical].value = pressedState;
+                log(`Pull-button pressed: Pin ${pin.physical} driven to ${pressedState}`);
+                sendPinState(pin.physical, "read", pressedState);
+                updatePinVisuals(pin.physical);
+            };
+            
+            const handleRelease = (e) => {
+                e.preventDefault();
+                pinsStateMap[pin.physical].value = defaultState;
+                log(`Pull-button released: Pin ${pin.physical} reverted to default ${defaultState}`);
+                sendPinState(pin.physical, "read", defaultState);
+                updatePinVisuals(pin.physical);
+            };
+            
+            pushBtn.addEventListener('mousedown', handlePress);
+            pushBtn.addEventListener('touchstart', handlePress);
+            
+            pushBtn.addEventListener('mouseup', handleRelease);
+            pushBtn.addEventListener('mouseleave', handleRelease);
+            pushBtn.addEventListener('touchend', handleRelease);
         }
     }
 }

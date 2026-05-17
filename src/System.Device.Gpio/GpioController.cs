@@ -225,7 +225,8 @@ namespace System.Device.Gpio
         public virtual void OpenPin(int pinNumber, PinMode mode)
         {
             _openPins[pinNumber] = mode;
-            _pinValues[pinNumber] = PinValue.Low;
+            var defaultVal = mode == PinMode.InputPullUp ? PinValue.High : PinValue.Low;
+            _pinValues[pinNumber] = defaultVal;
             NotifyPinChange(pinNumber, "mode", mode.ToString());
         }
 
@@ -285,6 +286,9 @@ namespace System.Device.Gpio
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
             _openPins[pinNumber] = mode;
             NotifyPinChange(pinNumber, "mode", mode.ToString());
+            
+            var defaultVal = mode == PinMode.InputPullUp ? PinValue.High : PinValue.Low;
+            _pinValues[pinNumber] = defaultVal;
         }
 
         public virtual PinMode GetPinMode(int pinNumber)

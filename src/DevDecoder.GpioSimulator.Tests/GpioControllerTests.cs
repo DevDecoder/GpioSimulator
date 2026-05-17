@@ -141,5 +141,24 @@ namespace DevDecoder.GpioSimulator.Tests
                 Assert.Equal(PinEventTypes.None, result.EventTypes);
             }
         }
+
+        [Fact]
+        public void OpenPin_InputPullUpAndPullDown_HaveCorrectDefaultStates()
+        {
+            using (var controller = new GpioController())
+            {
+                controller.OpenPin(14, PinMode.InputPullUp);
+                Assert.Equal(PinMode.InputPullUp, controller.GetPinMode(14));
+                Assert.Equal(PinValue.High, controller.Read(14));
+
+                controller.OpenPin(15, PinMode.InputPullDown);
+                Assert.Equal(PinMode.InputPullDown, controller.GetPinMode(15));
+                Assert.Equal(PinValue.Low, controller.Read(15));
+                
+                // Changing to InputPullUp should set value to High
+                controller.SetPinMode(15, PinMode.InputPullUp);
+                Assert.Equal(PinValue.High, controller.Read(15));
+            }
+        }
     }
 }
