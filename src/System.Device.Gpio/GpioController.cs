@@ -14,13 +14,23 @@ namespace System.Device.Gpio
     {
         private readonly ConcurrentDictionary<int, PinMode> _openPins = new ConcurrentDictionary<int, PinMode>();
         private readonly ConcurrentDictionary<int, PinValue> _pinValues = new ConcurrentDictionary<int, PinValue>();
+        private readonly ConcurrentDictionary<int, ConcurrentBag<(PinEventTypes Types, PinChangeEventHandler Handler)>> _pinCallbacks = 
+            new ConcurrentDictionary<int, ConcurrentBag<(PinEventTypes Types, PinChangeEventHandler Handler)>>();
         
         private ClientWebSocket _wsClient;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private static readonly HttpClient _httpClient = new HttpClient();
 
-        public GpioController()
+        public virtual PinNumberingScheme NumberingScheme { get; }
+        public virtual int PinCount => 40;
+
+        public GpioController() : this(PinNumberingScheme.Logical)
         {
+        }
+
+        public GpioController(PinNumberingScheme numberingScheme)
+        {
+            NumberingScheme = numberingScheme;
             EnsureServerStartedAndConnected().GetAwaiter().GetResult();
         }
 
@@ -116,7 +126,16 @@ namespace System.Device.Gpio
                             {
                                 string valStr = msg.Substring(valIndex, endValIndex - valIndex);
                                 PinValue val = valStr == "High" ? PinValue.High : PinValue.Low;
-                                _pinValues[pin] = val;
+                                
+                                PinValue oldVal = _pinValues.GetOrAdd(pin, PinValue.Low);
+                                if (oldVal != val)
+                                {
+                                    _pinValues[pin] = val;
+                                    
+                                    // Trigger callbacks on edge transition
+                                    PinEventTypes occurredType = val == PinValue.High ? PinEventTypes.Rising : PinEventTypes.Falling;
+                                    FireCallbacks(pin, occurredType);
+                                }
                             }
                         }
                     }
@@ -128,20 +147,55 @@ namespace System.Device.Gpio
             }
         }
 
-        public void OpenPin(int pinNumber, PinMode mode)
+        private void FireCallbacks(int pinNumber, PinEventTypes occurredType)
+        {
+            if (_pinCallbacks.TryGetValue(pinNumber, out var list))
+            {
+                foreach (var item in list)
+                {
+                    if ((item.Types & occurredType) != PinEventTypes.None)
+                    {
+                        try
+                        {
+                            // Invoke callback asynchronously on worker thread pool to prevent blocking receive loop
+                            Task.Run(() => item.Handler(this, new PinValueChangedEventArgs(occurredType, pinNumber)));
+                        }
+                        catch
+                        {
+                            // Absorb subscriber exceptions to keep receive loop stable
+                        }
+                    }
+                }
+            }
+        }
+
+        public virtual void OpenPin(int pinNumber)
+        {
+            OpenPin(pinNumber, PinMode.Input);
+        }
+
+        public virtual void OpenPin(int pinNumber, PinMode mode)
         {
             _openPins[pinNumber] = mode;
             _pinValues[pinNumber] = PinValue.Low;
             NotifyPinChange(pinNumber, "mode", mode.ToString());
         }
 
-        public void ClosePin(int pinNumber)
+        public virtual void OpenPin(int pinNumber, PinMode mode, PinValue initialValue)
+        {
+            _openPins[pinNumber] = mode;
+            _pinValues[pinNumber] = initialValue;
+            NotifyPinChange(pinNumber, "mode", mode.ToString());
+            NotifyPinChange(pinNumber, "write", initialValue.ToString());
+        }
+
+        public virtual void ClosePin(int pinNumber)
         {
             _openPins.TryRemove(pinNumber, out _);
             _pinValues.TryRemove(pinNumber, out _);
         }
 
-        public void Write(int pinNumber, PinValue value)
+        public virtual void Write(int pinNumber, PinValue value)
         {
             if (!_openPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
@@ -149,19 +203,131 @@ namespace System.Device.Gpio
             NotifyPinChange(pinNumber, "write", value.ToString());
         }
 
-        public PinValue Read(int pinNumber)
+        public virtual void Write(ReadOnlySpan<PinValuePair> pinValuePairs)
+        {
+            foreach (var pair in pinValuePairs)
+            {
+                Write(pair.PinNumber, pair.PinValue);
+            }
+        }
+
+        public virtual PinValue Read(int pinNumber)
         {
             if (!_openPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
             return _pinValues.TryGetValue(pinNumber, out var val) ? val : PinValue.Low;
         }
 
-        public void SetPinMode(int pinNumber, PinMode mode)
+        public virtual void Read(Span<PinValuePair> pinValuePairs)
+        {
+            for (int i = 0; i < pinValuePairs.Length; i++)
+            {
+                var pair = pinValuePairs[i];
+                var val = Read(pair.PinNumber);
+                pinValuePairs[i] = new PinValuePair(pair.PinNumber, val);
+            }
+        }
+
+        public virtual void SetPinMode(int pinNumber, PinMode mode)
         {
             if (!_openPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
             _openPins[pinNumber] = mode;
             NotifyPinChange(pinNumber, "mode", mode.ToString());
+        }
+
+        public virtual PinMode GetPinMode(int pinNumber)
+        {
+            if (!_openPins.TryGetValue(pinNumber, out var mode))
+                throw new InvalidOperationException($"Pin {pinNumber} is not open.");
+            return mode;
+        }
+
+        public virtual bool IsPinOpen(int pinNumber)
+        {
+            return _openPins.ContainsKey(pinNumber);
+        }
+
+        public virtual bool IsPinModeSupported(int pinNumber, PinMode mode)
+        {
+            return true;
+        }
+
+        public virtual void RegisterCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
+        {
+            var list = _pinCallbacks.GetOrAdd(pinNumber, _ => new ConcurrentBag<(PinEventTypes, PinChangeEventHandler)>());
+            list.Add((eventTypes, callback));
+        }
+
+        public virtual void UnregisterCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
+        {
+            if (_pinCallbacks.TryGetValue(pinNumber, out var list))
+            {
+                var items = list.ToArray();
+                var remaining = new ConcurrentBag<(PinEventTypes, PinChangeEventHandler)>();
+                foreach (var item in items)
+                {
+                    if (item.Handler != callback)
+                    {
+                        remaining.Add(item);
+                    }
+                }
+                _pinCallbacks[pinNumber] = remaining;
+            }
+        }
+
+        public virtual WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, TimeSpan timeout)
+        {
+            using (var cts = new CancellationTokenSource(timeout))
+            {
+                return WaitForEvent(pinNumber, eventTypes, cts.Token);
+            }
+        }
+
+        public virtual WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, CancellationToken cancellationToken)
+        {
+            var tcs = new TaskCompletionSource<PinEventTypes>();
+            
+            PinChangeEventHandler tempHandler = (sender, args) =>
+            {
+                tcs.TrySetResult(args.ChangeType);
+            };
+
+            RegisterCallbackForPinValueChangedEvent(pinNumber, eventTypes, tempHandler);
+
+            try
+            {
+                using (cancellationToken.Register(() => tcs.TrySetCanceled()))
+                {
+                    tcs.Task.Wait(cancellationToken);
+                    
+                    return new WaitForEventResult
+                    {
+                        TimedOut = false,
+                        EventTypes = tcs.Task.Result
+                    };
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return new WaitForEventResult
+                {
+                    TimedOut = true,
+                    EventTypes = PinEventTypes.None
+                };
+            }
+            catch (AggregateException ex) when (ex.InnerException is OperationCanceledException)
+            {
+                return new WaitForEventResult
+                {
+                    TimedOut = true,
+                    EventTypes = PinEventTypes.None
+                };
+            }
+            finally
+            {
+                UnregisterCallbackForPinValueChangedEvent(pinNumber, tempHandler);
+            }
         }
 
         private void NotifyPinChange(int pin, string action, string data)
@@ -184,6 +350,7 @@ namespace System.Device.Gpio
             _wsClient?.Dispose();
             _openPins.Clear();
             _pinValues.Clear();
+            _pinCallbacks.Clear();
         }
     }
 }
