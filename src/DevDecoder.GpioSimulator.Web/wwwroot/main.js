@@ -90,20 +90,11 @@ function renderBoard() {
         hotspot.className = `pin-hotspot pin-phys-${pin.physical}`;
         
         // Calculate percentages based on design viewBox (600 x 400 default)
-        let posX = pin.x;
-        if (activeSchema.boardId === "raspberry_pi_5_breakout") {
-            // Push overlays outwards so they don't overlap the text inside the breakout overlay
-            if (pin.physical % 2 === 1) {
-                posX = pin.x - 53; // odd pins shift left (from 188 to 135)
-            } else {
-                posX = pin.x + 53; // even pins shift right (from 254 to 307)
-            }
-        }
-        const leftPct = (posX / (activeSchema.visuals.svgWidth || 600)) * 100;
+        const leftPct = (pin.x / (activeSchema.visuals.svgWidth || 600)) * 100;
         const topPct = (pin.y / (activeSchema.visuals.svgHeight || 400)) * 100;
         
-        hotspot.style.left = `calc(${leftPct}% - 11px)`;
-        hotspot.style.top = `calc(${topPct}% - 11px)`;
+        hotspot.style.left = `calc(${leftPct}% - 10px)`;
+        hotspot.style.top = `calc(${topPct}% - 10px)`;
         
         // Add visual class types
         if (pin.name.includes("GND")) hotspot.classList.add("gnd");
