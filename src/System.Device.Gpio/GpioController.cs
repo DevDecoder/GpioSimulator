@@ -99,10 +99,15 @@ namespace System.Device.Gpio
                     var msg = Encoding.UTF8.GetString(buffer, 0, result.Count);
                     
                     // Manual JSON Parsing to avoid any library dependency on .NET Standard 2.0
-                    if (msg.Contains("\"action\":\"read\""))
+                    if (msg.Contains("\"pin\":") && msg.Contains("\"value\":\""))
                     {
                         int pinIndex = msg.IndexOf("\"pin\":") + 6;
                         int commaIndex = msg.IndexOf(",", pinIndex);
+                        if (commaIndex == -1)
+                        {
+                            commaIndex = msg.IndexOf("}", pinIndex);
+                        }
+
                         if (commaIndex > pinIndex && int.TryParse(msg.Substring(pinIndex, commaIndex - pinIndex).Trim(), out int pin))
                         {
                             int valIndex = msg.IndexOf("\"value\":\"") + 9;

@@ -10,8 +10,39 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseWebSockets();
 
-var clients = new ConcurrentBag<WebSocket>();
+var clients = new ConcurrentDictionary<Guid, WebSocket>();
 var pinStates = new ConcurrentDictionary<int, string>(); // Stores mode:value
+
+CancellationTokenSource? shutdownCts = null;
+var shutdownLock = new object();
+
+void StartShutdownTimer(int delaySeconds)
+{
+    lock (shutdownLock)
+    {
+        shutdownCts?.Cancel();
+        shutdownCts = new CancellationTokenSource();
+        var token = shutdownCts.Token;
+
+        Task.Delay(TimeSpan.FromSeconds(delaySeconds), token).ContinueWith(t =>
+        {
+            if (!t.IsCanceled)
+            {
+                Console.WriteLine("[Pi Simulator Web] No active connections. Shutting down server...");
+                app.Lifetime.StopApplication();
+            }
+        }, TaskContinuationOptions.ExecuteSynchronously);
+    }
+}
+
+void CancelShutdownTimer()
+{
+    lock (shutdownLock)
+    {
+        shutdownCts?.Cancel();
+        shutdownCts = null;
+    }
+}
 
 app.MapGet("/api/status", () => Results.Json(new { status = "online" }));
 
@@ -23,21 +54,23 @@ app.Use(async (context, next) =>
     {
         if (context.WebSockets.IsWebSocketRequest)
         {
+            var clientId = Guid.NewGuid();
             using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-            clients.Add(webSocket);
+            clients.TryAdd(clientId, webSocket);
+            CancelShutdownTimer();
             
-            // Send initial states to freshly opened client
-            foreach (var kvp in pinStates)
-            {
-                var parts = kvp.Value.Split(':');
-                var initMsg = JsonSerializer.Serialize(new { action = "state_change", pin = kvp.Key, mode = parts[0], value = parts[1] });
-                var bytes = Encoding.UTF8.GetBytes(initMsg);
-                await webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
-            }
-
-            var buffer = new byte[1024 * 4];
             try
             {
+                // Send initial states to freshly opened client
+                foreach (var kvp in pinStates)
+                {
+                    var parts = kvp.Value.Split(':');
+                    var initMsg = JsonSerializer.Serialize(new { action = "state_change", pin = kvp.Key, mode = parts[0], value = parts[1] });
+                    var bytes = Encoding.UTF8.GetBytes(initMsg);
+                    await webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                }
+
+                var buffer = new byte[1024 * 4];
                 while (webSocket.State == WebSocketState.Open)
                 {
                     var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
@@ -70,9 +103,9 @@ app.Use(async (context, next) =>
                     // Broadcast message to all other connected sockets
                     foreach (var client in clients)
                     {
-                        if (client.State == WebSocketState.Open && client != webSocket)
+                        if (client.Value.State == WebSocketState.Open && client.Value != webSocket)
                         {
-                            await client.SendAsync(new ArraySegment<byte>(buffer, 0, result.Count), WebSocketMessageType.Text, true, CancellationToken.None);
+                            await client.Value.SendAsync(new ArraySegment<byte>(buffer, 0, result.Count), WebSocketMessageType.Text, true, CancellationToken.None);
                         }
                     }
                 }
@@ -80,6 +113,14 @@ app.Use(async (context, next) =>
             catch
             {
                 // Handle disconnected socket
+            }
+            finally
+            {
+                clients.TryRemove(clientId, out _);
+                if (clients.IsEmpty)
+                {
+                    StartShutdownTimer(10); // Shutdown after 10 seconds of idleness
+                }
             }
         }
         else
@@ -92,5 +133,8 @@ app.Use(async (context, next) =>
         await next(context);
     }
 });
+
+// Start a 15-second grace period for the first client to connect upon booting
+StartShutdownTimer(15);
 
 app.Run();
