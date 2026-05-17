@@ -100,8 +100,12 @@ namespace System.Device.Gpio
                 
                 if (!File.Exists(dllPath))
                 {
-                    // Fallback searching up for dev execution
-                    dllPath = Path.Combine(baseDir, "..", "..", "..", "..", "DevDecoder.GpioSimulator.Web", "bin", "Debug", "net8.0", "DevDecoder.GpioSimulator.Web.dll");
+                    // Fallback searching up for dev execution - check Release first, then Debug
+                    dllPath = Path.Combine(baseDir, "..", "..", "..", "..", "DevDecoder.GpioSimulator.Web", "bin", "Release", "net8.0", "DevDecoder.GpioSimulator.Web.dll");
+                    if (!File.Exists(dllPath))
+                    {
+                        dllPath = Path.Combine(baseDir, "..", "..", "..", "..", "DevDecoder.GpioSimulator.Web", "bin", "Debug", "net8.0", "DevDecoder.GpioSimulator.Web.dll");
+                    }
                 }
 
                 if (File.Exists(dllPath))
@@ -129,7 +133,11 @@ namespace System.Device.Gpio
                     await Task.Delay(2000);
                 }
                 
-                BrowserLauncher.Open(serverUrl);
+                // Only open the browser if not running in a CI environment (headless cloud run)
+                if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")))
+                {
+                    BrowserLauncher.Open(serverUrl);
+                }
             }
 
             // Establish WebSocket client connection

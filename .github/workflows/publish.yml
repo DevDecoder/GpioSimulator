@@ -44,6 +44,6 @@ jobs:
         uses: alirezanet/publish-nuget@v3.1.0
         with:
           PROJECT_FILE_PATH: src/System.Device.Gpio/System.Device.Gpio.csproj
-          NUGET_KEY: ${{secrets.NUGET_API_KEY}}
+          NUGET_KEY: ${{secrets.NUGET_API_KEY_UNCLETHARGY}}
           INCLUDE_SYMBOLS: true
           VERSION_STATIC: ${{env.NBGV_Version}}
