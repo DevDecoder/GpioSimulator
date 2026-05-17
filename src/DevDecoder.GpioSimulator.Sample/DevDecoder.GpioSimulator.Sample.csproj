@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\System.Device.Gpio\System.Device.Gpio.csproj" />
+    <ProjectReference Include="..\DevDecoder.GpioSimulator.Web\DevDecoder.GpioSimulator.Web.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

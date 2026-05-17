@@ -41,6 +41,9 @@ async function loadBoard(boardId) {
         activeSchema = await res.json();
         renderBoard();
         
+        // Notify the server of the active board layout
+        await fetch(`/api/board/active?boardId=${boardId}`, { method: 'POST' });
+        
         // Request fresh pin status from server API after render
         await syncPinStatesFromServer();
     } catch (err) {

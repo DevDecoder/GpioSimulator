@@ -12,6 +12,10 @@ namespace DevDecoder.GpioSimulator.Sample
         private static readonly Dictionary<int, PinValue> _lastValues = new Dictionary<int, PinValue>();
         private static readonly object _consoleLock = new object();
 
+        private static GpioController _controller = null!;
+        private static CancellationTokenSource _watcherCts = new CancellationTokenSource();
+        private static Task _watcherTask = null!;
+
         static void Main(string[] args)
         {
             lock (_consoleLock)
@@ -24,11 +28,30 @@ namespace DevDecoder.GpioSimulator.Sample
                 Console.WriteLine("Booting simulator...");
             }
 
-            using var controller = new GpioController();
+            PinNumberingScheme defaultScheme = PinNumberingScheme.Logical;
+
+            // Parse args
+            for (int i = 0; i < args.Length; i++)
+            {
+                if ((args[i] == "--scheme" || args[i] == "-s") && i + 1 < args.Length)
+                {
+                    string val = args[i + 1].ToLower();
+                    if (val == "board" || val == "b")
+                    {
+                        defaultScheme = PinNumberingScheme.Board;
+                    }
+                    else if (val == "logical" || val == "l")
+                    {
+                        defaultScheme = PinNumberingScheme.Logical;
+                    }
+                }
+            }
+
+            _controller = new GpioController(defaultScheme);
 
             // Default startup configuration matching Pi 5 test
-            OpenPin(controller, 3, PinMode.Output);
-            OpenPin(controller, 5, PinMode.Input);
+            OpenPin(_controller, 3, PinMode.Output);
+            OpenPin(_controller, 5, PinMode.Input);
 
             lock (_consoleLock)
             {
@@ -36,13 +59,13 @@ namespace DevDecoder.GpioSimulator.Sample
                 Console.WriteLine("\n[Ready] Web UI spun up at: http://127.0.0.1:5050");
                 Console.ResetColor();
                 Console.WriteLine("Type 'help' to see list of interactive commands.");
-                PrintPinsStatus(controller);
+                PrintPinsStatus(_controller);
                 PrintPrompt();
             }
 
             // Background task to watch for dynamic input transitions from the Web UI
-            var watcherCts = new CancellationTokenSource();
-            var watcherTask = Task.Run(() => WatchInputPins(controller, watcherCts.Token));
+            _watcherCts = new CancellationTokenSource();
+            _watcherTask = Task.Run(() => WatchInputPins(_controller, _watcherCts.Token));
 
             while (true)
             {
@@ -61,15 +84,16 @@ namespace DevDecoder.GpioSimulator.Sample
 
                 if (cmd == "exit" || cmd == "quit" || cmd == "q")
                 {
-                    watcherCts.Cancel();
+                    _watcherCts.Cancel();
                     try
                     {
-                        watcherTask.Wait();
+                        _watcherTask.Wait();
                     }
                     catch
                     {
                         // Absorb
                     }
+                    _controller.Dispose();
                     break;
                 }
 
@@ -77,8 +101,75 @@ namespace DevDecoder.GpioSimulator.Sample
                 {
                     try
                     {
+                        var controller = _controller;
                         switch (cmd)
                         {
+                            case "scheme":
+                            case "schema":
+                            case "sc":
+                                if (parts.Length < 2)
+                                {
+                                    Console.ForegroundColor = ConsoleColor.Red;
+                                    Console.WriteLine("Error: Please specify scheme. Syntax: scheme <logical|board>");
+                                    Console.ResetColor();
+                                    break;
+                                }
+                                string newSchemeStr = parts[1].ToLower();
+                                PinNumberingScheme? newScheme = null;
+                                if (newSchemeStr == "logical" || newSchemeStr == "l")
+                                {
+                                    newScheme = PinNumberingScheme.Logical;
+                                }
+                                else if (newSchemeStr == "board" || newSchemeStr == "b")
+                                {
+                                    newScheme = PinNumberingScheme.Board;
+                                }
+
+                                if (newScheme == null)
+                                {
+                                    Console.ForegroundColor = ConsoleColor.Red;
+                                    Console.WriteLine($"Error: Invalid scheme '{parts[1]}'. Use 'logical' or 'board'.");
+                                    Console.ResetColor();
+                                    break;
+                                }
+
+                                if (newScheme == _controller.NumberingScheme)
+                                {
+                                    Console.ForegroundColor = ConsoleColor.Yellow;
+                                    Console.WriteLine($"Already using scheme: {newScheme}");
+                                    Console.ResetColor();
+                                    break;
+                                }
+
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                Console.WriteLine($"Switching numbering scheme to {newScheme}... Resetting simulator state.");
+                                Console.ResetColor();
+
+                                // 1. Shut down old watcher
+                                _watcherCts.Cancel();
+                                try { _watcherTask.Wait(); } catch {}
+
+                                // 2. Clear old state
+                                lock (_pins) _pins.Clear();
+                                lock (_lastValues) _lastValues.Clear();
+
+                                // 3. Dispose and re-instantiate controller
+                                _controller.Dispose();
+                                _controller = new GpioController(newScheme.Value);
+
+                                // 4. Start fresh watcher
+                                _watcherCts = new CancellationTokenSource();
+                                _watcherTask = Task.Run(() => WatchInputPins(_controller, _watcherCts.Token));
+
+                                // 5. Setup default pins under new scheme
+                                OpenPin(_controller, 3, PinMode.Output);
+                                OpenPin(_controller, 5, PinMode.Input);
+
+                                Console.ForegroundColor = ConsoleColor.Green;
+                                Console.WriteLine($"Successfully initialized GpioController under scheme: {newScheme}");
+                                Console.ResetColor();
+                                PrintPinsStatus(_controller);
+                                break;
                             case "help":
                             case "h":
                                 PrintHelp();
@@ -238,6 +329,8 @@ namespace DevDecoder.GpioSimulator.Sample
             Console.WriteLine("  close <pin>              - Close an open pin");
             Console.WriteLine("  write <pin> <1|0|h|l>    - Write High/Low to an output pin (e.g. write 3 1)");
             Console.WriteLine("  read <pin>               - Read the current value of an open pin");
+            Console.WriteLine("  scheme <logical|board>   - Switch dynamic pin numbering scheme (e.g. scheme board)");
+            Console.WriteLine("  schema <logical|board>   - Alias for scheme command");
             Console.WriteLine("  status                   - Display status of all currently opened pins");
             Console.WriteLine("  help                     - Show this guide");
             Console.WriteLine("  exit | quit | q          - Terminate the simulation program");
@@ -246,7 +339,7 @@ namespace DevDecoder.GpioSimulator.Sample
         private static void PrintPinsStatus(GpioController controller)
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("\n--- Current Open Pins Status ---");
+            Console.WriteLine($"\n--- Current Open Pins Status (Scheme: {controller.NumberingScheme}) ---");
             int pinCount = 0;
             lock (_pins)
             {
