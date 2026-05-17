@@ -1,0 +1,16 @@
+{
+  "boardId": "arduino_uno",
+  "displayName": "Arduino Uno R3",
+  "layoutType": "split_headers",
+  "visuals": {
+    "boardColor": "#006699"
+  },
+  "pins": [
+    { "physical": 1, "logical": 0, "name": "D0 (RX)", "supportedModes": ["Input", "Output"] },
+    { "physical": 2, "logical": 1, "name": "D1 (TX)", "supportedModes": ["Input", "Output"] },
+    { "physical": 3, "logical": 2, "name": "D2", "supportedModes": ["Input", "Output"] },
+    { "physical": 4, "logical": 3, "name": "D3 (~)", "supportedModes": ["Input", "Output"] },
+    { "physical": 14, "logical": 14, "name": "Analog A0", "supportedModes": ["Input", "AnalogInput"] },
+    { "physical": 15, "logical": 15, "name": "Analog A1", "supportedModes": ["Input", "AnalogInput"] }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "boardId": "raspberry_pi_5",
+  "displayName": "Raspberry Pi 5",
+  "layoutType": "dual_row_header",
+  "visuals": {
+    "boardColor": "#0d5c34",
+    "pinColumns": 2,
+    "totalPins": 40
+  },
+  "pins": [
+    { "physical": 1, "logical": null, "name": "3.3V Power", "supportedModes": [] },
+    { "physical": 2, "logical": null, "name": "5V Power", "supportedModes": [] },
+    { "physical": 3, "logical": 2, "name": "GPIO 2 (SDA)", "supportedModes": ["Input", "Output"] },
+    { "physical": 4, "logical": null, "name": "5V Power", "supportedModes": [] },
+    { "physical": 5, "logical": 3, "name": "GPIO 3 (SCL)", "supportedModes": ["Input", "Output"] },
+    { "physical": 6, "logical": null, "name": "GND", "supportedModes": [] },
+    { "physical": 7, "logical": 4, "name": "GPIO 4 (GPCLK0)", "supportedModes": ["Input", "Output"] },
+    { "physical": 8, "logical": 14, "name": "GPIO 14 (TXD)", "supportedModes": ["Input", "Output"] },
+    { "physical": 9, "logical": null, "name": "GND", "supportedModes": [] },
+    { "physical": 10, "logical": 15, "name": "GPIO 15 (RXD)", "supportedModes": ["Input", "Output"] },
+    { "physical": 11, "logical": 17, "name": "GPIO 17", "supportedModes": ["Input", "Output"] },
+    { "physical": 12, "logical": 18, "name": "GPIO 18", "supportedModes": ["Input", "Output"] }
+  ]
+}

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevDecoder GPIO Simulator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>DevDecoder GPIO Board Simulator</h1>
+        <div class="control-panel">
+            <label for="board-select">Select Active Board: </label>
+            <select id="board-select">
+                <option value="raspberry_pi_5">Raspberry Pi 5</option>
+                <option value="arduino_uno">Arduino Uno R3</option>
+            </select>
+        </div>
+    </header>
+    
+    <main>
+        <div id="board-container">
+            <div id="visual-board"></div>
+        </div>
+        <div id="terminal-panel">
+            <h3>Real-Time Activity Log</h3>
+            <div id="terminal-log"></div>
+        </div>
+    </main>
+
+    <script src="main.js"></script>
+</body>
+</html>
