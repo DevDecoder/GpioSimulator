@@ -2,7 +2,7 @@ using System;
 using System.Device.Gpio;
 using System.Threading;
 
-namespace GpioSimulator.Test
+namespace DevDecoder.GpioSimulator.Sample
 {
     class Program
     {

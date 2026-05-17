@@ -53,13 +53,16 @@ namespace System.Device.Gpio
 
                 if (File.Exists(dllPath))
                 {
-                    Process.Start(new ProcessStartInfo
+                    var startInfo = new ProcessStartInfo
                     {
                         FileName = "dotnet",
-                        Arguments = $"\"{dllPath}\" --urls {serverUrl}",
+                        Arguments = $"--roll-forward Major \"{dllPath}\" --urls {serverUrl}",
                         CreateNoWindow = true,
-                        UseShellExecute = false
-                    });
+                        UseShellExecute = false,
+                        WorkingDirectory = Path.GetDirectoryName(dllPath)
+                    };
+                    startInfo.EnvironmentVariables["ASPNETCORE_ENVIRONMENT"] = "Development";
+                    Process.Start(startInfo);
                     
                     // Allow server spin up time
                     await Task.Delay(2000);
