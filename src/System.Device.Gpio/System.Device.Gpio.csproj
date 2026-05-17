@@ -31,7 +31,7 @@
 
   <Target Name="IncludePublishedWebServerFiles" DependsOnTargets="PublishWebServer">
     <ItemGroup>
-      <TfmSpecificPackageFile Include="../DevDecoder.GpioSimulator.Web/bin/$(Configuration)/net8.0/publish/**/*.*">
+      <TfmSpecificPackageFile Include="../DevDecoder.GpioSimulator.Web/bin/$(Configuration)/net8.0/publish/**/*.*" Exclude="../DevDecoder.GpioSimulator.Web/bin/$(Configuration)/net8.0/publish/**/*.pdb">
         <PackagePath>contentFiles/any/any/simulator/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
         <PackageCopyToOutput>true</PackageCopyToOutput>
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
