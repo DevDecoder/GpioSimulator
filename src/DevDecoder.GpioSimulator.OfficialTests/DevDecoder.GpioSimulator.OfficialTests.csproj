@@ -6,7 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <DefineConstants>$(DefineConstants);OFFICIAL_GPIO</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

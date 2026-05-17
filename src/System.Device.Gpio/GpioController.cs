@@ -24,28 +24,46 @@ namespace System.Device.Gpio
             _driver = driver ?? throw new ArgumentNullException(nameof(driver));
         }
 
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, GpioPin> _gpioPins = new System.Collections.Concurrent.ConcurrentDictionary<int, GpioPin>();
+
         public virtual PinNumberingScheme NumberingScheme => _numberingScheme;
         public virtual int PinCount => _driver.PinCount;
 
-        public virtual bool IsValidPin(int pinNumber) => _driver.IsPinModeSupported(pinNumber, PinMode.Input);
+        public virtual GpioPin OpenPin(int pinNumber)
+        {
+            if (IsPinOpen(pinNumber))
+                return _gpioPins[pinNumber];
 
-        public virtual void OpenPin(int pinNumber) => _driver.OpenPin(pinNumber);
-        public virtual void OpenPin(int pinNumber, PinMode mode)
-        {
             _driver.OpenPin(pinNumber);
-            _driver.SetPinMode(pinNumber, mode);
+            var pin = new GpioPin(pinNumber, this);
+            _gpioPins[pinNumber] = pin;
+            return pin;
         }
-        public virtual void OpenPin(int pinNumber, PinMode mode, PinValue initialValue)
+
+        public virtual GpioPin OpenPin(int pinNumber, PinMode mode)
         {
-            _driver.OpenPin(pinNumber);
+            var pin = OpenPin(pinNumber);
+            _driver.SetPinMode(pinNumber, mode);
+            return pin;
+        }
+
+        public virtual GpioPin OpenPin(int pinNumber, PinMode mode, PinValue initialValue)
+        {
+            var pin = OpenPin(pinNumber);
             _driver.SetPinMode(pinNumber, mode);
             _driver.Write(pinNumber, initialValue);
+            return pin;
         }
-        public virtual void ClosePin(int pinNumber) => _driver.ClosePin(pinNumber);
+        public virtual void ClosePin(int pinNumber)
+        {
+            _driver.ClosePin(pinNumber);
+            _gpioPins.TryRemove(pinNumber, out _);
+        }
         public virtual void Write(int pinNumber, PinValue value) => _driver.Write(pinNumber, value);
         public virtual void Write(ReadOnlySpan<PinValuePair> pinValuePairs) => _driver.Write(pinValuePairs);
         public virtual PinValue Read(int pinNumber) => _driver.Read(pinNumber);
         public virtual void Read(Span<PinValuePair> pinValuePairs) => _driver.Read(pinValuePairs);
+        public virtual void Toggle(int pinNumber) => _driver.Toggle(pinNumber);
         public virtual void SetPinMode(int pinNumber, PinMode mode) => _driver.SetPinMode(pinNumber, mode);
         public virtual PinMode GetPinMode(int pinNumber) => _driver.GetPinMode(pinNumber);
         public virtual bool IsPinOpen(int pinNumber) => _driver.IsPinOpen(pinNumber);
@@ -70,6 +88,11 @@ namespace System.Device.Gpio
         
         public void Dispose()
         {
+            foreach (var pin in _gpioPins.Values)
+            {
+                _driver.ClosePin(pin.PinNumber);
+            }
+            _gpioPins.Clear();
             _driver?.Dispose();
         }
     }

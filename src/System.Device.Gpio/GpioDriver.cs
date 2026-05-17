@@ -31,6 +31,7 @@ namespace System.Device.Gpio
                 pinValuePairs[i] = new PinValuePair(pinValuePairs[i].PinNumber, Read(pinValuePairs[i].PinNumber));
             }
         }
+        protected internal virtual void Toggle(int pinNumber) => Write(pinNumber, !Read(pinNumber));
         protected internal abstract bool IsPinOpen(int pinNumber);
 
         protected abstract void Dispose(bool disposing);

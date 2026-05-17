@@ -215,38 +215,20 @@ namespace DevDecoder.GpioSimulator.Tests
             }
         }
 
-#if !OFFICIAL_GPIO
         [Fact]
-        public void OpenPin_AlreadyOpen_ThrowsInvalidOperationException()
+        public void OpenPin_AlreadyOpen_ChangesMode()
         {
             var driver = new LocalDriver(PinNumberingScheme.Logical);
             using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
             {
                 controller.OpenPin(4, PinMode.Input);
                 Assert.True(controller.IsPinOpen(4));
+                Assert.Equal(PinMode.Input, controller.GetPinMode(4));
 
-                // Opening again must throw InvalidOperationException
-                Assert.Throws<InvalidOperationException>(() => controller.OpenPin(4, PinMode.Input));
-                Assert.Throws<InvalidOperationException>(() => controller.OpenPin(4, PinMode.Output));
+                // Opening again does not throw, just changes mode
+                controller.OpenPin(4, PinMode.Output);
+                Assert.Equal(PinMode.Output, controller.GetPinMode(4));
             }
         }
-#endif
-
-#if !OFFICIAL_GPIO
-        [Fact]
-        public void IsValidPin_InvalidRanges_ReturnsFalse()
-        {
-            var driver = new LocalDriver(PinNumberingScheme.Logical);
-            using (var controller = new GpioController(PinNumberingScheme.Logical, driver))
-            {
-                Assert.True(controller.IsValidPin(5));
-                Assert.True(controller.IsValidPin(2));
-                Assert.True(controller.IsValidPin(27));
-                Assert.False(controller.IsValidPin(-1));
-                Assert.False(controller.IsValidPin(0));
-                Assert.False(controller.IsValidPin(28));
-            }
-        }
-#endif
     }
 }
