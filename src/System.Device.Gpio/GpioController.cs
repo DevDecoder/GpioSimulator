@@ -85,7 +85,7 @@ namespace System.Device.Gpio
             try
             {
                 _wsClient = new ClientWebSocket();
-                await _wsClient.ConnectAsync(new Uri("ws://127.0.0.1:5050/ws"), CancellationToken.None);
+                await _wsClient.ConnectAsync(new Uri("ws://127.0.0.1:5050/ws?client=controller"), CancellationToken.None);
                 
                 // Start background listener
                 _ = Task.Run(ReceiveWebSocketMessages);

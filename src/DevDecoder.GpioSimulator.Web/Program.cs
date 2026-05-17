@@ -7,10 +7,16 @@ var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+provider.Mappings[".gsc"] = "application/json";
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    ContentTypeProvider = provider
+});
 app.UseWebSockets();
 
-var clients = new ConcurrentDictionary<Guid, WebSocket>();
+var clients = new ConcurrentDictionary<Guid, (WebSocket Socket, string Type)>();
 var pinStates = new ConcurrentDictionary<int, string>(); // Stores mode:value
 
 CancellationTokenSource? shutdownCts = null;
@@ -29,7 +35,7 @@ void StartShutdownTimer(int delaySeconds)
             if (!t.IsCanceled)
             {
                 Console.WriteLine("[Pi Simulator Web] No active connections. Shutting down server...");
-                app.Lifetime.StopApplication();
+                Environment.Exit(0);
             }
         }, TaskContinuationOptions.ExecuteSynchronously);
     }
@@ -55,9 +61,18 @@ app.Use(async (context, next) =>
         if (context.WebSockets.IsWebSocketRequest)
         {
             var clientId = Guid.NewGuid();
+            var clientType = context.Request.Query["client"].ToString();
+            if (string.IsNullOrEmpty(clientType)) clientType = "ui";
+
+            Console.WriteLine($"[Pi Simulator Web] Client connected: {clientId} (Type: {clientType})");
+
             using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-            clients.TryAdd(clientId, webSocket);
-            CancelShutdownTimer();
+            clients.TryAdd(clientId, (webSocket, clientType));
+
+            if (clientType == "controller")
+            {
+                CancelShutdownTimer();
+            }
             
             try
             {
@@ -103,23 +118,25 @@ app.Use(async (context, next) =>
                     // Broadcast message to all other connected sockets
                     foreach (var client in clients)
                     {
-                        if (client.Value.State == WebSocketState.Open && client.Value != webSocket)
+                        if (client.Value.Socket.State == WebSocketState.Open && client.Value.Socket != webSocket)
                         {
-                            await client.Value.SendAsync(new ArraySegment<byte>(buffer, 0, result.Count), WebSocketMessageType.Text, true, CancellationToken.None);
+                            await client.Value.Socket.SendAsync(new ArraySegment<byte>(buffer, 0, result.Count), WebSocketMessageType.Text, true, CancellationToken.None);
                         }
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Handle disconnected socket
+                Console.WriteLine($"[Pi Simulator Web] Error in client {clientId} loop: {ex.Message}");
             }
             finally
             {
                 clients.TryRemove(clientId, out _);
-                if (clients.IsEmpty)
+                int activeControllers = clients.Values.Count(c => c.Type == "controller");
+                Console.WriteLine($"[Pi Simulator Web] Client disconnected: {clientId} (Type: {clientType}). Remaining controllers: {activeControllers}");
+                if (activeControllers == 0)
                 {
-                    StartShutdownTimer(10); // Shutdown after 10 seconds of idleness
+                    StartShutdownTimer(3); // Shutdown after 3 seconds of no active controller
                 }
             }
         }

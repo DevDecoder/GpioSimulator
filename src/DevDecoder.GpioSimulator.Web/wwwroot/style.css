@@ -1,131 +1,500 @@
 :root {
-    --bg-color: #121214;
-    --card-bg: #1a1a1e;
-    --text-color: #e1e1e6;
-    --accent: #4fc3f7;
-    --led-off: #2e2e34;
-    --led-on: #4caf50;
+    --bg-color: #0b0c10;
+    --card-bg: rgba(22, 24, 30, 0.85);
+    --text-color: #c5c6c7;
+    --text-bright: #ffffff;
+    --accent: #66fcf1;
+    --accent-dim: #45a29e;
+    --led-off: #2e3033;
+    --led-on: #39ff14;
+    --border-color: rgba(102, 252, 241, 0.2);
+    --power-color: #ff3838;
+    --v3-color: #ff9f43;
+    --gnd-color: #576574;
 }
 
 body {
     background-color: var(--bg-color);
+    background-image: radial-gradient(circle at top right, rgba(102, 252, 241, 0.08), transparent 40%);
     color: var(--text-color);
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Outfit', 'Segoe UI', system-ui, sans-serif;
     margin: 0;
-    padding: 20px;
+    padding: 24px;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    height: 95vh;
+    height: 100vh;
 }
 
 header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 2px solid var(--card-bg);
-    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+}
+
+h1 {
+    font-size: 24px;
+    margin: 0;
+    font-weight: 700;
+    color: var(--text-bright);
+    letter-spacing: 0.5px;
+    background: linear-gradient(90deg, var(--text-bright), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.control-panel {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 select {
-    background-color: var(--card-bg);
-    color: var(--text-color);
+    background-color: #1f2833;
+    color: var(--text-bright);
     border: 1px solid var(--accent);
-    padding: 8px;
-    border-radius: 4px;
+    padding: 8px 16px;
+    border-radius: 6px;
     cursor: pointer;
+    font-weight: 600;
+    outline: none;
+    box-shadow: 0 0 10px rgba(102, 252, 241, 0.1);
+    transition: all 0.3s;
+}
+
+select:hover {
+    box-shadow: 0 0 15px rgba(102, 252, 241, 0.25);
+    border-color: #fff;
 }
 
 main {
     display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 20px;
-    margin-top: 20px;
+    grid-template-columns: 7fr 3fr;
+    gap: 24px;
     flex-grow: 1;
-    height: 75vh;
+    min-height: 0;
 }
 
 #board-container {
     background-color: var(--card-bg);
-    border-radius: 8px;
-    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 24px;
     display: flex;
     justify-content: center;
     align-items: center;
-    border: 1px solid #29292e;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    backdrop-filter: blur(8px);
 }
 
 #visual-board {
+    display: inline-block;
+    max-width: 100%;
+}
+
+.svg-board-container {
     width: 100%;
     height: 100%;
     display: flex;
-    flex-direction: column;
+    align-items: center;
     justify-content: center;
-    align-items: center;
+    border-radius: 8px;
+    overflow: hidden;
 }
 
-/* Grid styles for board pins */
-.pin-header {
-    background-color: #222;
-    border-radius: 4px;
-    padding: 10px;
-    display: grid;
-    gap: 8px;
-    border: 2px solid #555;
+.svg-board-container svg {
+    filter: drop-shadow(0 15px 25px rgba(0,0,0,0.6));
 }
 
-.pin-row {
-    display: flex;
-    gap: 15px;
-    align-items: center;
-}
-
-.pin-node {
-    width: 24px;
-    height: 24px;
-    background-color: #888;
+/* Geo-mapped Interactive Pin Hotspots */
+.pin-hotspot {
+    position: absolute;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
     display: flex;
     justify-content: center;
     align-items: center;
     cursor: pointer;
+    font-size: 9px;
+    font-weight: 800;
+    color: #fff;
+    border: 2px solid rgba(255,255,255,0.4);
+    box-sizing: border-box;
+    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.8), 0 2px 5px rgba(0,0,0,0.5);
+}
+
+.pin-hotspot span {
+    pointer-events: none;
+}
+
+/* Color Coding based on physical type */
+.pin-hotspot.gnd {
+    background-color: var(--gnd-color);
+    border-color: #7f8c8d;
+}
+.pin-hotspot.v5 {
+    background-color: var(--power-color);
+    border-color: #ff7675;
+}
+.pin-hotspot.v3 {
+    background-color: var(--v3-color);
+    border-color: #ffeaa7;
+}
+.pin-hotspot.gpio {
+    background-color: #2c3e50;
+    border-color: #34495e;
+}
+
+.pin-hotspot:hover {
+    transform: scale(1.3);
+    z-index: 20;
+    border-color: #fff;
+    box-shadow: 0 0 12px #fff;
+}
+
+/* Glowing Indicator LED on high signals */
+.pin-hotspot.active {
+    background-color: var(--led-on) !important;
+    border-color: #a3ff7a !important;
+    color: #000 !important;
+    box-shadow: 0 0 15px var(--led-on), inset 0 1px 3px rgba(255,255,255,0.8);
+}
+
+/* Premium Floating Tooltip / Micro-Overlay */
+.glass-panel {
+    background: rgba(18, 22, 28, 0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(102, 252, 241, 0.35);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.7);
+    width: 220px;
+    transition: transform 0.2s, opacity 0.2s;
+    box-sizing: border-box;
+}
+
+.tooltip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+
+.tooltip-header h4 {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-bright);
+    font-weight: 700;
+}
+
+.close-btn {
+    cursor: pointer;
+    font-size: 18px;
+    color: #888;
+    line-height: 1;
+}
+
+.close-btn:hover {
+    color: #fff;
+}
+
+.tooltip-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.info-label {
+    color: #888;
+}
+
+.info-val {
+    color: var(--text-bright);
+    font-weight: 600;
+}
+
+.font-mon {
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+
+/* Badges and indicators inside tooltip */
+.badge {
+    padding: 2px 8px;
+    border-radius: 10px;
     font-size: 10px;
+    text-transform: uppercase;
+}
+
+.badge.mode-input {
+    background-color: rgba(52, 152, 219, 0.2);
+    color: #3498db;
+    border: 1px solid rgba(52, 152, 219, 0.4);
+}
+
+.badge.mode-output {
+    background-color: rgba(155, 89, 182, 0.2);
+    color: #9b59b6;
+    border: 1px solid rgba(155, 89, 182, 0.4);
+}
+
+.badge.mode-none {
+    background-color: rgba(127, 143, 166, 0.2);
+    color: #7f8fc6;
+    border: 1px solid rgba(127, 143, 166, 0.4);
+}
+
+.state-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-weight: bold;
-    color: #000;
 }
 
-.pin-node.gnd { background-color: #333; color: #fff; }
-.pin-node.v5 { background-color: #e53935; color: #fff; }
-.pin-node.v3 { background-color: #fb8c00; color: #fff; }
+.state-indicator.high {
+    color: var(--led-on);
+}
 
-.led-indicator {
-    width: 12px;
-    height: 12px;
+.state-indicator.low {
+    color: #ff4757;
+}
+
+.state-dot {
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
-    background-color: var(--led-off);
-    transition: background-color 0.2s, box-shadow 0.2s;
+    background-color: currentColor;
+    display: inline-block;
 }
 
-.led-indicator.active {
-    background-color: var(--led-on);
-    box-shadow: 0 0 10px var(--led-on);
+/* Control toggle section inside overlay */
+.tooltip-control {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
-#terminal-panel {
-    background-color: #0a0a0c;
-    border-radius: 8px;
-    border: 1px solid #1a1a1e;
-    padding: 15px;
+.control-text {
     display: flex;
     flex-direction: column;
 }
 
+.control-label {
+    font-size: 11px;
+    color: var(--text-bright);
+    font-weight: 700;
+}
+
+.control-sub {
+    font-size: 9px;
+    color: #888;
+}
+
+/* iOS Toggle Slider Switch Styling */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #3e4450;
+    transition: .3s;
+    border-radius: 20px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: var(--led-on);
+    box-shadow: 0 0 8px rgba(57, 255, 20, 0.4);
+}
+
+input:checked + .slider:before {
+    transform: translateX(16px);
+}
+
+.switch.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.switch.disabled .slider {
+    cursor: not-allowed;
+}
+
+/* Terminal Log Panel */
+#terminal-panel {
+    background-color: #07090e;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.8), 0 5px 15px rgba(0,0,0,0.4);
+    min-height: 0;
+}
+
+#terminal-panel h3 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
 #terminal-log {
     flex-grow: 1;
-    font-family: 'Consolas', monospace;
-    font-size: 13px;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 11px;
+    line-height: 1.5;
     overflow-y: auto;
-    background-color: #000;
-    padding: 10px;
-    border-radius: 4px;
-    color: #00ff00;
+    background-color: #020204;
+    padding: 12px;
+    border-radius: 6px;
+    color: #a0ffe6;
+    border: 1px solid #1a2238;
+}
+
+#terminal-log div {
+    margin-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.01);
+}
+
+/* Full screen overlay for disconnect state */
+#disconnected-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(7, 9, 14, 0.85);
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+}
+
+#disconnected-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.overlay-card {
+    background: rgba(18, 22, 28, 0.95);
+    border: 1px solid rgba(102, 252, 241, 0.35);
+    border-radius: 16px;
+    padding: 32px;
+    text-align: center;
+    max-width: 420px;
+    width: 90%;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(102, 252, 241, 0.1);
+    transform: translateY(20px);
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+#disconnected-overlay.active .overlay-card {
+    transform: translateY(0);
+}
+
+.overlay-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    animation: float 3s ease-in-out infinite;
+}
+
+.overlay-card h2 {
+    margin: 0 0 12px 0;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--text-bright);
+    background: linear-gradient(90deg, #ff7675, #ff3838);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.overlay-card p {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    color: var(--text-color);
+}
+
+.overlay-card .sub-text {
+    color: #888;
+    font-size: 13px;
+    margin-bottom: 24px;
+}
+
+.reconnect-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(102, 252, 241, 0.05);
+    border: 1px solid rgba(102, 252, 241, 0.15);
+    border-radius: 20px;
+    padding: 8px 16px;
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.pulse-dot {
+    width: 8px;
+    height: 8px;
+    background-color: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+@keyframes pulse {
+    0% { transform: scale(0.9); opacity: 0.5; box-shadow: 0 0 0 0 rgba(102, 252, 241, 0.7); }
+    70% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 8px rgba(102, 252, 241, 0); }
+    100% { transform: scale(0.9); opacity: 0.5; box-shadow: 0 0 0 0 rgba(102, 252, 241, 0); }
 }

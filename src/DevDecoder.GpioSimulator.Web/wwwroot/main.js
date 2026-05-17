@@ -1,10 +1,28 @@
 let activeSchema = null;
 let ws = null;
-const pinsStateMap = {};
+const pinsStateMap = {}; // Maps logicalPin -> { mode: "Input"|"Output"|"None", value: "High"|"Low" }
+let activeTooltipPin = null; // Tracks physical pin currently shown in tooltip
 
 const boardSelect = document.getElementById('board-select');
 const boardVisual = document.getElementById('visual-board');
 const logTerminal = document.getElementById('terminal-log');
+const disconnectOverlay = document.getElementById('disconnected-overlay');
+
+// Setup floating tooltip element
+const tooltip = document.createElement('div');
+tooltip.id = 'pin-tooltip';
+tooltip.className = 'glass-panel';
+tooltip.style.position = 'absolute';
+tooltip.style.display = 'none';
+tooltip.style.zIndex = '1000';
+document.body.appendChild(tooltip);
+
+// Close tooltip when clicking outside
+document.addEventListener('click', (e) => {
+    if (!tooltip.contains(e.target) && !e.target.classList.contains('pin-hotspot')) {
+        closeTooltip();
+    }
+});
 
 function log(message) {
     const time = new Date().toLocaleTimeString();
@@ -15,118 +33,258 @@ function log(message) {
 }
 
 async function loadBoard(boardId) {
-    log(`Loading board schema for: ${boardId}...`);
+    closeTooltip();
+    log(`Loading board component for: ${boardId}...`);
     try {
-        const res = await fetch(`board_schemas/${boardId}.json`);
+        const res = await fetch(`components/${boardId}.gsc?_=${Date.now()}`);
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         activeSchema = await res.json();
         renderBoard();
+        
+        // Request fresh pin status from server API after render
+        await syncPinStatesFromServer();
     } catch (err) {
-        log(`Error loading schema: ${err}`);
+        log(`Error loading component: ${err}`);
+    }
+}
+
+async function syncPinStatesFromServer() {
+    try {
+        const res = await fetch('/api/pins');
+        if (res.ok) {
+            const serverStates = await res.json();
+            Object.entries(serverStates).forEach(([pinStr, stateStr]) => {
+                const pin = parseInt(pinStr);
+                const parts = stateStr.split(':');
+                pinsStateMap[pin] = {
+                    mode: parts[0],
+                    value: parts[1]
+                };
+                updatePinVisuals(pin);
+            });
+            log("Synchronized all pin states from server.");
+        }
+    } catch (err) {
+        log(`Failed to sync states from server: ${err}`);
     }
 }
 
 function renderBoard() {
     boardVisual.innerHTML = "";
+    boardVisual.style.position = "relative";
+    boardVisual.style.width = "100%";
+    boardVisual.style.maxWidth = `${activeSchema.visuals.svgWidth || 600}px`;
     
-    const headerDiv = document.createElement('div');
-    headerDiv.className = "pin-header";
-    headerDiv.style.backgroundColor = activeSchema.visuals.boardColor || "#1b3a24";
+    // Inject the raw board vector SVG
+    const svgContainer = document.createElement('div');
+    svgContainer.className = "svg-board-container";
+    svgContainer.innerHTML = activeSchema.visuals.svgTemplate;
+    boardVisual.appendChild(svgContainer);
     
-    if (activeSchema.layoutType === "dual_row_header") {
-        headerDiv.style.gridTemplateColumns = `repeat(${activeSchema.visuals.pinColumns}, 1fr)`;
+    // Dynamically draw and overlay pin hotspots based on coordinates
+    activeSchema.pins.forEach(pin => {
+        const hotspot = document.createElement('div');
+        hotspot.className = `pin-hotspot pin-phys-${pin.physical}`;
         
-        for (let i = 0; i < activeSchema.pins.length; i += 2) {
-            const rowDiv = document.createElement('div');
-            rowDiv.className = "pin-row";
-            
-            const pinLeft = activeSchema.pins[i];
-            const pinRight = activeSchema.pins[i+1];
-            
-            if (pinLeft) rowDiv.appendChild(createPinNode(pinLeft));
-            if (pinRight) rowDiv.appendChild(createPinNode(pinRight));
-            
-            headerDiv.appendChild(rowDiv);
-        }
-    } else {
-        // Fallback single line or split layout
-        activeSchema.pins.forEach(pin => {
-            const row = document.createElement('div');
-            row.className = "pin-row";
-            row.appendChild(createPinNode(pin));
-            headerDiv.appendChild(row);
+        // Calculate percentages based on design viewBox (600 x 400 default)
+        const leftPct = (pin.x / (activeSchema.visuals.svgWidth || 600)) * 100;
+        const topPct = (pin.y / (activeSchema.visuals.svgHeight || 400)) * 100;
+        
+        hotspot.style.left = `calc(${leftPct}% - 11px)`;
+        hotspot.style.top = `calc(${topPct}% - 11px)`;
+        
+        // Add visual class types
+        if (pin.name.includes("GND")) hotspot.classList.add("gnd");
+        else if (pin.name.includes("5V")) hotspot.classList.add("v5");
+        else if (pin.name.includes("3.3")) hotspot.classList.add("v3");
+        else hotspot.classList.add("gpio");
+        
+        // Pin physical number overlay inside circle
+        const indexSpan = document.createElement('span');
+        indexSpan.textContent = pin.physical;
+        hotspot.appendChild(indexSpan);
+        
+        // Attach interactivity
+        hotspot.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showTooltip(pin, hotspot);
         });
-    }
+        
+        boardVisual.appendChild(hotspot);
+        
+        // If it's logical, update its active visualization
+        if (pin.logical !== null) {
+            updatePinVisuals(pin.logical);
+        }
+    });
     
-    boardVisual.appendChild(headerDiv);
-    log(`Rendered ${activeSchema.displayName} header visual successfully.`);
+    log(`Rendered ${activeSchema.displayName} vector board successfully.`);
 }
 
-function createPinNode(pin) {
-    const div = document.createElement('div');
-    div.className = "pin-node-wrapper";
-    div.style.display = "flex";
-    div.style.alignItems = "center";
-    div.style.gap = "10px";
+function updatePinVisuals(logicalPin) {
+    const pinDef = activeSchema?.pins.find(p => p.logical === logicalPin);
+    if (!pinDef) return;
     
-    const node = document.createElement('div');
-    node.className = "pin-node";
-    node.textContent = pin.physical;
+    const hotspot = boardVisual.querySelector(`.pin-phys-${pinDef.physical}`);
+    if (!hotspot) return;
     
-    if (pin.name.includes("GND")) node.classList.add("gnd");
-    else if (pin.name.includes("5V")) node.classList.add("v5");
-    else if (pin.name.includes("3.3V")) node.classList.add("v3");
+    const state = pinsStateMap[logicalPin] || { mode: "None", value: "Low" };
     
-    const label = document.createElement('span');
-    label.textContent = pin.name;
-    label.style.fontSize = "12px";
-    
-    const led = document.createElement('div');
-    led.className = "led-indicator";
-    led.id = `led-pin-${pin.physical}`;
-    
-    div.appendChild(node);
-    div.appendChild(led);
-    div.appendChild(label);
-    
-    if (pin.logical !== null) {
-        // If input, make it interactive/clickable
-        node.style.cursor = "pointer";
-        node.onclick = () => {
-            const currentState = pinsStateMap[pin.logical] === "High" ? "Low" : "High";
-            pinsStateMap[pin.logical] = currentState;
-            led.classList.toggle('active', currentState === "High");
-            
-            log(`Input Triggered on Pin ${pin.logical}: ${currentState}`);
-            sendPinState(pin.logical, "read", currentState);
-        };
+    // Apply styling based on active logic level
+    if (state.value === "High") {
+        hotspot.classList.add("active");
+    } else {
+        hotspot.classList.remove("active");
     }
     
-    return div;
+    // Update tooltip if currently open for this pin
+    if (activeTooltipPin === pinDef.physical) {
+        refreshTooltipContent(pinDef, hotspot);
+    }
+}
+
+function showTooltip(pin, anchorEl) {
+    activeTooltipPin = pin.physical;
+    refreshTooltipContent(pin, anchorEl);
+    
+    // Position tooltip beautifully relative to anchor element
+    const rect = anchorEl.getBoundingClientRect();
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    
+    tooltip.style.display = 'block';
+    
+    // Check if tooltip overflows right side of viewport
+    let leftPos = rect.left + scrollLeft + 30;
+    if (leftPos + 220 > window.innerWidth) {
+        leftPos = rect.left + scrollLeft - 235;
+    }
+    
+    tooltip.style.left = `${leftPos}px`;
+    tooltip.style.top = `${rect.top + scrollTop - 40}px`;
+}
+
+function refreshTooltipContent(pin, anchorEl) {
+    const state = pinsStateMap[pin.logical] || { mode: "None", value: "Low" };
+    
+    let logicalStr = "N/A (Power / GND)";
+    let controlSection = "";
+    
+    if (pin.logical !== null) {
+        logicalStr = `GPIO ${pin.logical}`;
+        
+        // Only show interactive toggle if pin is set to Input mode
+        const isInput = state.mode.toLowerCase() === "input";
+        const checkedAttr = state.value === "High" ? "checked" : "";
+        const disabledAttr = !isInput ? "disabled" : "";
+        
+        controlSection = `
+            <div class="tooltip-control">
+                <label class="switch ${!isInput ? 'disabled' : ''}">
+                    <input type="checkbox" id="tooltip-state-toggle" ${checkedAttr} ${disabledAttr}>
+                    <span class="slider round"></span>
+                </label>
+                <div class="control-text">
+                    <span class="control-label">Manual Input Driver</span>
+                    <span class="control-sub">${isInput ? 'Toggle HIGH/LOW' : 'Output governed by code'}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    tooltip.innerHTML = `
+        <div class="tooltip-header">
+            <h4>${pin.name}</h4>
+            <span class="close-btn" onclick="closeTooltip()">&times;</span>
+        </div>
+        <div class="tooltip-body">
+            <div class="tooltip-info-row">
+                <span class="info-label">Physical Pin:</span>
+                <span class="info-val font-mon">${pin.physical}</span>
+            </div>
+            <div class="tooltip-info-row">
+                <span class="info-label">Logical ID:</span>
+                <span class="info-val font-mon">${logicalStr}</span>
+            </div>
+            <div class="tooltip-info-row">
+                <span class="info-label">Current Mode:</span>
+                <span class="info-val badge mode-${state.mode.toLowerCase()}">${state.mode}</span>
+            </div>
+            <div class="tooltip-info-row">
+                <span class="info-label">Logic Level:</span>
+                <span class="info-val state-indicator ${state.value.toLowerCase()}">
+                    <span class="state-dot"></span>
+                    ${state.value}
+                </span>
+            </div>
+            ${controlSection}
+        </div>
+    `;
+    
+    // Wire up driver state input toggle
+    if (pin.logical !== null) {
+        const toggle = document.getElementById('tooltip-state-toggle');
+        if (toggle) {
+            toggle.onchange = (e) => {
+                const newState = e.target.checked ? "High" : "Low";
+                pinsStateMap[pin.logical].value = newState;
+                
+                log(`Input manually driven HIGH on Pin ${pin.logical}: ${newState}`);
+                sendPinState(pin.logical, "read", newState);
+                
+                // Immediately update board visuals locally
+                updatePinVisuals(pin.logical);
+            };
+        }
+    }
+}
+
+function closeTooltip() {
+    tooltip.style.display = 'none';
+    activeTooltipPin = null;
 }
 
 function setupWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    ws = new WebSocket(`${protocol}//${window.location.host}/ws?client=ui`);
     
-    ws.onopen = () => log("WebSocket Connected to Simulator Server.");
+    ws.onopen = () => {
+        log("WebSocket Connected to Simulator Server.");
+        disconnectOverlay.classList.remove('active');
+    };
     
     ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.action === "write") {
-            pinsStateMap[msg.pin] = msg.value;
-            const physicalPin = activeSchema?.pins.find(p => p.logical === msg.pin)?.physical;
-            if (physicalPin) {
-                const led = document.getElementById(`led-pin-${physicalPin}`);
-                if (led) {
-                    led.classList.toggle('active', msg.value === "High");
-                }
+        try {
+            const msg = JSON.parse(event.data);
+            
+            if (msg.action === "write") {
+                pinsStateMap[msg.pin] = pinsStateMap[msg.pin] || { mode: "Output", value: "Low" };
+                pinsStateMap[msg.pin].value = msg.value;
+                updatePinVisuals(msg.pin);
+                log(`Pin ${msg.pin} state set to: ${msg.value}`);
             }
-            log(`Pin ${msg.pin} state set to: ${msg.value}`);
+            else if (msg.action === "mode") {
+                pinsStateMap[msg.pin] = pinsStateMap[msg.pin] || { mode: "Input", value: "Low" };
+                pinsStateMap[msg.pin].mode = msg.mode;
+                updatePinVisuals(msg.pin);
+                log(`Pin ${msg.pin} mode configured: ${msg.mode}`);
+            }
+            else if (msg.action === "state_change") {
+                pinsStateMap[msg.pin] = {
+                    mode: msg.mode,
+                    value: msg.value
+                };
+                updatePinVisuals(msg.pin);
+                log(`Pin ${msg.pin} updated from host: Mode=${msg.mode}, State=${msg.value}`);
+            }
+        } catch (err) {
+            console.error("Error parsing WebSocket packet", err);
         }
     };
     
     ws.onclose = () => {
         log("WebSocket closed. Attempting reconnect...");
+        disconnectOverlay.classList.add('active');
         setTimeout(setupWebSocket, 3000);
     };
 }

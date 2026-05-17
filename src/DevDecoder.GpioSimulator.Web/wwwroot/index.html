@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DevDecoder GPIO Simulator</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
     <header>
@@ -28,6 +31,19 @@
         </div>
     </main>
 
-    <script src="main.js"></script>
+    <div id="disconnected-overlay">
+        <div class="overlay-card">
+            <div class="overlay-icon">🔌</div>
+            <h2>Simulator Disconnected</h2>
+            <p>The simulator web server has shut down.</p>
+            <p class="sub-text">You can now close this browser tab safely.</p>
+            <div class="reconnect-status">
+                <span class="pulse-dot"></span>
+                Attempting to reconnect...
+            </div>
+        </div>
+    </div>
+
+    <script src="main.js?v=2"></script>
 </body>
 </html>
