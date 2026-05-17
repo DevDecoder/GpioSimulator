@@ -94,21 +94,10 @@ namespace System.Device.Gpio
 
             if (!serverActive)
             {
-                // Try to find the Web App DLL relative to build directory
+                // Try to find the Web App DLL
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                string dllPath = Path.Combine(baseDir, "simulator", "DevDecoder.GpioSimulator.Web.dll");
                 
-                if (!File.Exists(dllPath))
-                {
-                    // Fallback searching up for dev execution - check Release first, then Debug
-                    dllPath = Path.Combine(baseDir, "..", "..", "..", "..", "DevDecoder.GpioSimulator.Web", "bin", "Release", "net8.0", "DevDecoder.GpioSimulator.Web.dll");
-                    if (!File.Exists(dllPath))
-                    {
-                        dllPath = Path.Combine(baseDir, "..", "..", "..", "..", "DevDecoder.GpioSimulator.Web", "bin", "Debug", "net8.0", "DevDecoder.GpioSimulator.Web.dll");
-                    }
-                }
-
-                if (File.Exists(dllPath))
+                if (TryFindDevWebDll(baseDir, out string dllPath))
                 {
                     var startInfo = new ProcessStartInfo
                     {
@@ -404,6 +393,69 @@ namespace System.Device.Gpio
                 _wsClient.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None)
                          .GetAwaiter().GetResult();
             }
+        }
+
+        private static bool TryFindDevWebDll(string baseDir, out string dllPath)
+        {
+            // First check the simulator sub-folder in the base directory
+            dllPath = Path.Combine(baseDir, "simulator", "DevDecoder.GpioSimulator.Web.dll");
+            if (File.Exists(dllPath))
+            {
+                return true;
+            }
+
+            dllPath = null;
+            var dir = new DirectoryInfo(baseDir);
+            
+            while (dir != null)
+            {
+                var webAppDir = Path.Combine(dir.FullName, "src", "DevDecoder.GpioSimulator.Web");
+                if (!Directory.Exists(webAppDir))
+                {
+                    webAppDir = Path.Combine(dir.FullName, "DevDecoder.GpioSimulator.Web");
+                }
+
+                if (Directory.Exists(webAppDir))
+                {
+                    var binPath = Path.Combine(webAppDir, "bin");
+                    if (Directory.Exists(binPath))
+                    {
+                        var configurations = new[] { "Release", "Debug" };
+                        foreach (var config in configurations)
+                        {
+                            var configPath = Path.Combine(binPath, config);
+                            if (Directory.Exists(configPath))
+                            {
+                                foreach (var frameworkDir in Directory.GetDirectories(configPath, "net*"))
+                                {
+                                    var targetDll = Path.Combine(frameworkDir, "DevDecoder.GpioSimulator.Web.dll");
+                                    if (File.Exists(targetDll))
+                                    {
+                                        dllPath = targetDll;
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+
+                        try
+                        {
+                            var files = Directory.GetFiles(binPath, "DevDecoder.GpioSimulator.Web.dll", SearchOption.AllDirectories);
+                            if (files.Length > 0)
+                            {
+                                dllPath = files[0];
+                                return true;
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore IO errors
+                        }
+                    }
+                }
+                dir = dir.Parent;
+            }
+            return false;
         }
 
         public void Dispose()
