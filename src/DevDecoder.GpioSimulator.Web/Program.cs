@@ -300,6 +300,11 @@ app.Use(async (context, next) =>
                             pinStates.AddOrUpdate(physPin, $"{mode}:Low", (k, old) => $"{mode}:{old.Split(':')[1]}");
                             Log($"Physical Pin {physPin} mode configured: {mode}");
                         }
+                        else if (action == "close")
+                        {
+                            pinStates.TryRemove(physPin, out _);
+                            Log($"Physical Pin {physPin} closed");
+                        }
                     }
 
                     // Broadcast message to all other connected sockets
@@ -323,26 +328,6 @@ app.Use(async (context, next) =>
                 clients.TryRemove(clientId, out _);
                 int activeControllers = clients.Values.Count(c => c.Type == "controller");
                 Log($"Client disconnected: {clientId} (Type: {clientType}). Remaining controllers: {activeControllers}");
-                
-                if (clientType == "controller")
-                {
-                    pinStates.Clear();
-                    
-                    var resetMsg = "{\"action\":\"reset\"}";
-                    var resetBytes = Encoding.UTF8.GetBytes(resetMsg);
-                    foreach (var client in clients.Values)
-                    {
-                        if (client.Socket.State == WebSocketState.Open)
-                        {
-                            try
-                            {
-                                await client.Socket.SendAsync(new ArraySegment<byte>(resetBytes), WebSocketMessageType.Text, true, CancellationToken.None);
-                            }
-                            catch { }
-                        }
-                    }
-                }
-
                 if (activeControllers == 0)
                 {
                     StartShutdownTimer(3); // Shutdown after 3 seconds of no active controller

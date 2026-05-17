@@ -279,6 +279,11 @@ function setupWebSocket() {
                 }
                 log("Simulator state reset.");
             }
+            else if (msg.action === "close") {
+                delete pinsStateMap[msg.pin];
+                updatePinVisuals(msg.pin);
+                log(`Pin ${msg.pin} closed`);
+            }
             else if (msg.action === "log") {
                 log(msg.value);
             }

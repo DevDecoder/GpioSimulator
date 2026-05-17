@@ -242,7 +242,10 @@ namespace System.Device.Gpio
 
         public virtual void ClosePin(int pinNumber)
         {
-            _openPins.TryRemove(pinNumber, out _);
+            if (_openPins.TryRemove(pinNumber, out _))
+            {
+                NotifyPinChange(pinNumber, "close", "");
+            }
             _pinValues.TryRemove(pinNumber, out _);
         }
 
@@ -397,6 +400,16 @@ namespace System.Device.Gpio
 
         public void Dispose()
         {
+            // Cleanly close all currently open pins to release them on the server
+            foreach (var pin in _openPins.Keys)
+            {
+                try
+                {
+                    ClosePin(pin);
+                }
+                catch { }
+            }
+
             _cts.Cancel();
             _wsClient?.Dispose();
             _openPins.Clear();
