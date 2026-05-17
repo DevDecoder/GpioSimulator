@@ -1,12 +1,98 @@
+import { GoldenLayout } from 'https://esm.sh/golden-layout@2.6.0';
+
 let activeSchema = null;
 let ws = null;
-const pinsStateMap = {}; // Maps physicalPin -> { mode: "Input"|"Output"|"None", value: "High"|"Low" }
-let activeTooltipPin = null; // Tracks physical pin currently shown in tooltip
+const pinsStateMap = {};
+let activeTooltipPin = null;
 
-const boardSelect = document.getElementById('board-select');
-const boardVisual = document.getElementById('visual-board');
-const logTerminal = document.getElementById('terminal-log');
-const disconnectOverlay = document.getElementById('disconnected-overlay');
+// Track Canvas Simulation States
+let activeTool = 'pointer';
+const customBoards = [];
+
+// Initialize Layout Templates
+const boardContainer = document.getElementById('board-container');
+const terminalPanel = document.getElementById('terminal-panel');
+const componentsPanel = document.getElementById('components-panel');
+const disconnectedOverlay = document.getElementById('disconnected-overlay');
+
+// Pre-cache core elements relative to the templates (even when detached)
+const boardVisual = boardContainer.querySelector('#visual-board');
+const logTerminal = terminalPanel.querySelector('#terminal-log');
+const listContainer = componentsPanel.querySelector('#boards-list');
+const activeToolBadge = boardContainer.querySelector('#active-tool-badge');
+
+// Detach from DOM to make them dynamic templates
+boardContainer.remove();
+terminalPanel.remove();
+componentsPanel.remove();
+
+const layoutContainer = document.getElementById('layout-container');
+const myLayout = new GoldenLayout(layoutContainer);
+
+// Dynamic resize observer to prevent cut-off panes on window resize
+const resizeObserver = new ResizeObserver(() => {
+    const rect = layoutContainer.getBoundingClientRect();
+    myLayout.setSize(rect.width, rect.height);
+});
+resizeObserver.observe(layoutContainer);
+
+// Register Component Factories
+myLayout.registerComponentFactoryFunction('board', (container) => {
+    container.element.appendChild(boardContainer);
+    // Add custom class to parent stack container to hide header / title
+    setTimeout(() => {
+        const stackElement = container.element.closest('.lm_stack');
+        if (stackElement) {
+            stackElement.classList.add('no-header');
+        }
+    }, 0);
+});
+myLayout.registerComponentFactoryFunction('logs', (container) => {
+    container.element.appendChild(terminalPanel);
+});
+myLayout.registerComponentFactoryFunction('components', (container) => {
+    container.element.appendChild(componentsPanel);
+});
+
+// Configure Window split
+const defaultLayoutConfig = {
+    root: {
+        type: 'row',
+        content: [
+            {
+                type: 'component',
+                componentType: 'components',
+                title: 'Components',
+                width: 25,
+                isClosable: true
+            },
+            {
+                type: 'column',
+                width: 75,
+                content: [
+                    {
+                        type: 'component',
+                        componentType: 'board',
+                        title: 'Simulator Workspace',
+                        height: 65,
+                        isClosable: false
+                    },
+                    {
+                        type: 'component',
+                        componentType: 'logs',
+                        title: 'Real-Time Activity Log',
+                        height: 35,
+                        isClosable: true
+                    }
+                ]
+            }
+        ]
+    }
+};
+
+// Initialize workspace
+myLayout.loadLayout(defaultLayoutConfig);
+setTimeout(syncViewMenuChecks, 50);
 
 // Setup floating tooltip element
 const tooltip = document.createElement('div');
@@ -25,6 +111,7 @@ document.addEventListener('click', (e) => {
 });
 
 function log(message) {
+    if (!logTerminal) return;
     const time = new Date().toLocaleTimeString();
     const div = document.createElement('div');
     div.textContent = `[${time}] ${message}`;
@@ -36,16 +123,26 @@ async function loadBoard(boardId) {
     closeTooltip();
     log(`Loading board component for: ${boardId}...`);
     try {
-        const res = await fetch(`components/${boardId}.gsc?_=${Date.now()}`);
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-        activeSchema = await res.json();
+        let res;
+        // Search custom uploads first, then default directory
+        const customBoard = customBoards.find(b => b.boardId === boardId);
+        if (customBoard) {
+            activeSchema = customBoard.schema;
+        } else {
+            res = await fetch(`components/${boardId}.gsc?_=${Date.now()}`);
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+            activeSchema = await res.json();
+        }
+        
         renderBoard();
         
-        // Notify the server of the active board layout
-        await fetch(`/api/board/active?boardId=${boardId}`, { method: 'POST' });
+        // Notify the server of the active board layout if standard board
+        if (!customBoard) {
+            await fetch(`/api/board/active?boardId=${boardId}`, { method: 'POST' });
+        }
         
-        // Request fresh pin status from server API after render
         await syncPinStatesFromServer();
+        updateComponentsPaneUI(boardId);
     } catch (err) {
         log(`Error loading component: ${err}`);
     }
@@ -73,49 +170,46 @@ async function syncPinStatesFromServer() {
 }
 
 function renderBoard() {
+    if (!boardVisual) return;
     boardVisual.innerHTML = "";
     boardVisual.style.position = "relative";
     boardVisual.style.width = "100%";
     boardVisual.style.maxWidth = `${activeSchema.visuals.svgWidth || 600}px`;
     
-    // Inject the raw board vector SVG
     const svgContainer = document.createElement('div');
     svgContainer.className = "svg-board-container";
     svgContainer.innerHTML = activeSchema.visuals.svgTemplate;
     boardVisual.appendChild(svgContainer);
     
-    // Dynamically draw and overlay pin hotspots based on coordinates
     activeSchema.pins.forEach(pin => {
         const hotspot = document.createElement('div');
         hotspot.className = `pin-hotspot pin-phys-${pin.physical}`;
         
-        // Calculate percentages based on design viewBox (600 x 400 default)
         const leftPct = (pin.x / (activeSchema.visuals.svgWidth || 600)) * 100;
         const topPct = (pin.y / (activeSchema.visuals.svgHeight || 400)) * 100;
         
         hotspot.style.left = `calc(${leftPct}% - 10px)`;
         hotspot.style.top = `calc(${topPct}% - 10px)`;
         
-        // Add visual class types
         if (pin.name.includes("GND")) hotspot.classList.add("gnd");
         else if (pin.name.includes("5V")) hotspot.classList.add("v5");
         else if (pin.name.includes("3.3")) hotspot.classList.add("v3");
         else hotspot.classList.add("gpio");
         
-        // Pin physical number overlay inside circle
         const indexSpan = document.createElement('span');
         indexSpan.textContent = pin.physical;
         hotspot.appendChild(indexSpan);
         
-        // Attach interactivity
         hotspot.addEventListener('click', (e) => {
             e.stopPropagation();
-            showTooltip(pin, hotspot);
+            if (activeTool === 'pointer') {
+                showTooltip(pin, hotspot);
+            } else if (activeTool === 'delete') {
+                log(`Interacted with Pin ${pin.physical} with Delete Tool.`);
+            }
         });
         
         boardVisual.appendChild(hotspot);
-        
-        // Update its active visualization
         updatePinVisuals(pin.physical);
     });
     
@@ -123,6 +217,8 @@ function renderBoard() {
 }
 
 function updatePinVisuals(physicalPin) {
+    if (!boardVisual) return;
+    
     const pinDef = activeSchema?.pins.find(p => p.physical === physicalPin);
     if (!pinDef) return;
     
@@ -131,14 +227,12 @@ function updatePinVisuals(physicalPin) {
     
     const state = pinsStateMap[physicalPin] || { mode: "None", value: "Low" };
     
-    // Apply styling based on active logic level
     if (state.value === "High") {
         hotspot.classList.add("active");
     } else {
         hotspot.classList.remove("active");
     }
     
-    // Dynamically apply input/output mode classes for visualization
     hotspot.classList.remove("mode-input", "mode-output", "mode-none");
     if (state.mode === "Input") {
         hotspot.classList.add("mode-input");
@@ -148,7 +242,6 @@ function updatePinVisuals(physicalPin) {
         hotspot.classList.add("mode-none");
     }
     
-    // Update tooltip if currently open for this pin
     if (activeTooltipPin === physicalPin) {
         refreshTooltipContent(pinDef, hotspot);
     }
@@ -158,14 +251,12 @@ function showTooltip(pin, anchorEl) {
     activeTooltipPin = pin.physical;
     refreshTooltipContent(pin, anchorEl);
     
-    // Position tooltip beautifully relative to anchor element
     const rect = anchorEl.getBoundingClientRect();
     const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
     
     tooltip.style.display = 'block';
     
-    // Check if tooltip overflows right side of viewport
     let leftPos = rect.left + scrollLeft + 30;
     if (leftPos + 220 > window.innerWidth) {
         leftPos = rect.left + scrollLeft - 235;
@@ -177,14 +268,11 @@ function showTooltip(pin, anchorEl) {
 
 function refreshTooltipContent(pin, anchorEl) {
     const state = pinsStateMap[pin.physical] || { mode: "None", value: "Low" };
-    
     let logicalStr = "N/A (Power / GND)";
     let controlSection = "";
     
     if (pin.logical !== null) {
         logicalStr = `GPIO ${pin.logical}`;
-        
-        // Only show interactive toggle if pin is set to Input mode
         const isInput = state.mode.toLowerCase() === "input";
         const checkedAttr = state.value === "High" ? "checked" : "";
         const disabledAttr = !isInput ? "disabled" : "";
@@ -206,7 +294,7 @@ function refreshTooltipContent(pin, anchorEl) {
     tooltip.innerHTML = `
         <div class="tooltip-header">
             <h4>${pin.name}</h4>
-            <span class="close-btn" onclick="closeTooltip()">&times;</span>
+            <span class="close-btn" id="tooltip-close-x">&times;</span>
         </div>
         <div class="tooltip-body">
             <div class="tooltip-info-row">
@@ -232,18 +320,17 @@ function refreshTooltipContent(pin, anchorEl) {
         </div>
     `;
     
-    // Wire up driver state input toggle
+    const closeX = tooltip.querySelector('#tooltip-close-x');
+    if (closeX) closeX.onclick = closeTooltip;
+    
     if (pin.logical !== null) {
-        const toggle = document.getElementById('tooltip-state-toggle');
+        const toggle = tooltip.querySelector('#tooltip-state-toggle');
         if (toggle) {
             toggle.onchange = (e) => {
                 const newState = e.target.checked ? "High" : "Low";
                 pinsStateMap[pin.physical].value = newState;
-                
                 log(`Input manually driven to ${newState} on Pin ${pin.physical}`);
                 sendPinState(pin.physical, "read", newState);
-                
-                // Immediately update board visuals locally
                 updatePinVisuals(pin.physical);
             };
         }
@@ -261,7 +348,7 @@ function setupWebSocket() {
     
     ws.onopen = () => {
         log("WebSocket Connected to Simulator Server.");
-        disconnectOverlay.classList.remove('active');
+        if (disconnectedOverlay) disconnectedOverlay.classList.remove('active');
     };
     
     ws.onmessage = (event) => {
@@ -314,7 +401,7 @@ function setupWebSocket() {
     
     ws.onclose = () => {
         log("WebSocket closed. Attempting reconnect...");
-        disconnectOverlay.classList.add('active');
+        if (disconnectedOverlay) disconnectedOverlay.classList.add('active');
         setTimeout(setupWebSocket, 3000);
     };
 }
@@ -325,7 +412,316 @@ function sendPinState(pin, action, val) {
     }
 }
 
-boardSelect.onchange = (e) => loadBoard(e.target.value);
+// ----------------------------------------------------
+// Task 4: Dynamic Components Panel and Switcher Setup
+// ----------------------------------------------------
+const catalogBoards = [
+    { id: 'raspberry_pi_5_breakout', name: 'Raspberry Pi 5 (Breakout)', desc: 'Breadboard breakout prototype' },
+    { id: 'raspberry_pi_5', name: 'Raspberry Pi 5', desc: 'Standard single board computer' },
+    { id: 'arduino_uno', name: 'Arduino Uno R3', desc: 'Sleek ATmega328P microcontroller' }
+];
 
-// Initialize
+function updateComponentsPaneUI(activeBoardId) {
+    if (!listContainer) return;
+    listContainer.innerHTML = "";
+    
+    // Render default catalog
+    catalogBoards.forEach(board => {
+        const card = createBoardCard(board.id, board.name, board.desc, activeBoardId === board.id);
+        listContainer.appendChild(card);
+    });
+    
+    // Render custom uploaded boards
+    customBoards.forEach(board => {
+        const card = createBoardCard(board.boardId, board.name, 'Uploaded Custom Board File', activeBoardId === board.boardId);
+        listContainer.appendChild(card);
+    });
+}
+
+function createBoardCard(id, name, desc, isActive) {
+    const card = document.createElement('div');
+    card.className = `component-card ${isActive ? 'active' : ''}`;
+    card.innerHTML = `
+        <span class="comp-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" class="comp-icon-svg">
+                <rect x="5" y="5" width="14" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+                <rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor"/>
+                <path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+        </span>
+        <div class="comp-info">
+            <span class="comp-name">${name}</span>
+            <span class="comp-desc">${desc}</span>
+        </div>
+        ${isActive ? '<span class="active-badge">Active</span>' : ''}
+    `;
+    card.onclick = () => loadBoard(id);
+    return card;
+}
+
+// ----------------------------------------------------
+// Task 5: Theme Switching Handlers
+// ----------------------------------------------------
+const themeToggleBtn = document.getElementById('theme-toggle');
+const themeIcon = document.getElementById('theme-icon');
+const layoutThemeLink = document.getElementById('golden-layout-theme');
+
+themeToggleBtn.onclick = () => {
+    const isLight = document.body.classList.toggle('light-theme');
+    if (isLight) {
+        themeIcon.textContent = '☀️';
+        layoutThemeLink.href = 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/dist/css/themes/goldenlayout-light-theme.css';
+        localStorage.setItem('theme', 'light');
+    } else {
+        themeIcon.textContent = '🌙';
+        layoutThemeLink.href = 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/dist/css/themes/goldenlayout-dark-theme.css';
+        localStorage.setItem('theme', 'dark');
+    }
+};
+
+// Check stored preference
+const savedTheme = localStorage.getItem('theme');
+if (savedTheme === 'light') {
+    document.body.classList.add('light-theme');
+    themeIcon.textContent = '☀️';
+    layoutThemeLink.href = 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/dist/css/themes/goldenlayout-light-theme.css';
+}
+
+// ----------------------------------------------------
+// Task 6: View Menu Dynamic Toggling Handlers
+// ----------------------------------------------------
+const viewComponentsBtn = document.getElementById('menu-view-components');
+const viewLogsBtn = document.getElementById('menu-view-logs');
+
+// Helper to recursively find component items in Golden Layout v2
+function findComponentItems(node, componentType) {
+    if (!node) return [];
+    const results = [];
+    if (node.type === 'component' && node.componentType === componentType) {
+        results.push(node);
+    }
+    if (node.contentItems && Array.isArray(node.contentItems)) {
+        for (const child of node.contentItems) {
+            results.push(...findComponentItems(child, componentType));
+        }
+    }
+    return results;
+}
+
+viewComponentsBtn.onclick = () => {
+    togglePanel('components');
+};
+
+viewLogsBtn.onclick = () => {
+    togglePanel('logs');
+};
+
+function togglePanel(componentType) {
+    if (!myLayout.rootItem) return;
+    
+    // Scan layout for existing instances
+    const existingItems = findComponentItems(myLayout.rootItem, componentType);
+    const isVisible = existingItems.length > 0;
+    
+    if (!isVisible) {
+        // Re-append to Golden Layout
+        const newItemConfig = {
+            type: 'component',
+            componentType: componentType,
+            title: componentType === 'components' ? 'Components' : 'Real-Time Activity Log',
+            isClosable: true
+        };
+        
+        if (componentType === 'components') {
+            if (myLayout.rootItem.type === 'row') {
+                // Add components to the left of the root row
+                myLayout.rootItem.addChild(newItemConfig, 0);
+            } else {
+                // Wrap current root in a row
+                const oldRootConfig = myLayout.saveLayout();
+                myLayout.loadLayout({
+                    root: {
+                        type: 'row',
+                        content: [
+                            newItemConfig,
+                            oldRootConfig.root
+                        ]
+                    }
+                });
+            }
+        } else if (componentType === 'logs') {
+            const boardItems = findComponentItems(myLayout.rootItem, 'board');
+            const boardItem = boardItems[0];
+            if (boardItem && boardItem.parent && boardItem.parent.type === 'column') {
+                // Add logs below the board in its existing parent column
+                boardItem.parent.addChild(newItemConfig);
+            } else {
+                // Wrap the board in a column with the logs below it
+                const oldRootConfig = myLayout.saveLayout();
+                
+                // Helper to replace the board component node inside the saved config with a column
+                function wrapBoardInConfig(node) {
+                    if (!node) return null;
+                    if (node.type === 'component' && node.componentType === 'board') {
+                        return {
+                            type: 'column',
+                            content: [
+                                node,
+                                newItemConfig
+                            ]
+                        };
+                    }
+                    if (node.content) {
+                        node.content = node.content.map(child => wrapBoardInConfig(child));
+                    }
+                    return node;
+                }
+                
+                const newRoot = wrapBoardInConfig(oldRootConfig.root);
+                myLayout.loadLayout({ root: newRoot });
+            }
+        }
+    } else {
+        // Close from layout
+        existingItems.forEach(item => {
+            if (typeof item.remove === 'function') {
+                item.remove();
+            } else if (item.parent) {
+                item.parent.removeChild(item);
+            }
+        });
+    }
+}
+
+// Keep menu items state checked in sync when panes are closed manually or layout changes
+function syncViewMenuChecks() {
+    if (!myLayout.rootItem) return;
+    
+    const componentsVisible = findComponentItems(myLayout.rootItem, 'components').length > 0;
+    const logsVisible = findComponentItems(myLayout.rootItem, 'logs').length > 0;
+    
+    if (componentsVisible) {
+        viewComponentsBtn.classList.add('checked');
+    } else {
+        viewComponentsBtn.classList.remove('checked');
+    }
+    
+    if (logsVisible) {
+        viewLogsBtn.classList.add('checked');
+    } else {
+        viewLogsBtn.classList.remove('checked');
+    }
+}
+
+// Bind synchronization to layout updates
+myLayout.on('stateChanged', syncViewMenuChecks);
+myLayout.on('itemDestroyed', syncViewMenuChecks);
+myLayout.on('itemCreated', syncViewMenuChecks);
+
+// ----------------------------------------------------
+// Task 7: File Menu (Open/Save) Circuit Engine
+// ----------------------------------------------------
+const openFileBtn = document.getElementById('menu-file-open');
+const saveFileBtn = document.getElementById('menu-file-save');
+const filePickerInput = document.getElementById('file-picker');
+
+saveFileBtn.onclick = () => {
+    if (!activeSchema) return;
+    
+    // Create Layout schema compilation (.gsl format)
+    const layoutConfig = {
+        format: "gsl",
+        version: "1.0",
+        boardId: activeSchema.boardId || 'raspberry_pi_5_breakout',
+        components: [],
+        connections: []
+    };
+    
+    const blob = new Blob([JSON.stringify(layoutConfig, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${layoutConfig.boardId}-layout.gsl`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    log(`Circuit layout configurations saved: ${layoutConfig.boardId}-layout.gsl`);
+};
+
+openFileBtn.onclick = () => {
+    filePickerInput.click();
+};
+
+filePickerInput.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+        try {
+            const data = JSON.parse(event.target.result);
+            if (data.format === "gsl") {
+                log(`Parsing circuit config file: ${file.name}`);
+                await loadBoard(data.boardId);
+            } else if (data.pins && data.visuals && data.displayName) {
+                // Parse component spec (.gsc format)
+                log(`Loading custom component spec file: ${file.name}`);
+                const boardId = file.name.replace('.gsc', '');
+                
+                customBoards.push({
+                    boardId: boardId,
+                    name: data.displayName,
+                    schema: data
+                });
+                
+                await loadBoard(boardId);
+            } else {
+                throw new Error("Invalid file schema format!");
+            }
+        } catch (err) {
+            log(`Failed to open custom file: ${err.message}`);
+        }
+    };
+    reader.readAsText(file);
+};
+
+// ----------------------------------------------------
+// Task 8: Canvas Operations Toolbar Handlers
+// ----------------------------------------------------
+const tools = [
+    { id: 'pointer', name: 'Pointer' },
+    { id: 'connector', name: 'Connector' },
+    { id: 'move', name: 'Move' },
+    { id: 'delete', name: 'Delete' }
+];
+
+tools.forEach(tool => {
+    const btn = boardContainer.querySelector(`#tool-${tool.id}`);
+    if (btn) {
+        btn.onclick = () => {
+            tools.forEach(t => {
+                const otherBtn = boardContainer.querySelector(`#tool-${t.id}`);
+                if (otherBtn) otherBtn.classList.remove('active');
+            });
+            btn.classList.add('active');
+            activeTool = tool.id;
+            if (activeToolBadge) activeToolBadge.textContent = tool.name;
+            log(`Active tool changed to: ${tool.name}`);
+            
+            // Alter board cursor style based on tool selection
+            if (boardVisual) {
+                if (tool.id === 'pointer') boardVisual.style.cursor = 'default';
+                else if (tool.id === 'connector') boardVisual.style.cursor = 'crosshair';
+                else if (tool.id === 'move') boardVisual.style.cursor = 'grab';
+                else if (tool.id === 'delete') boardVisual.style.cursor = 'alias';
+            }
+        };
+    }
+});
+
+// Setup
 loadBoard('raspberry_pi_5_breakout').then(setupWebSocket);
+
+import { runLayoutVerificationTests } from './test-suite.js';
+setTimeout(runLayoutVerificationTests, 1000);

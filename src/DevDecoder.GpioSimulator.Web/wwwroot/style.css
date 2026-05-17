@@ -1,31 +1,445 @@
 :root {
+    /* Global Variables - Default Dark mode */
     --bg-color: #0b0c10;
     --card-bg: rgba(22, 24, 30, 0.85);
     --text-color: #c5c6c7;
     --text-bright: #ffffff;
     --accent: #66fcf1;
     --accent-dim: #45a29e;
+    --accent-glow: rgba(102, 252, 241, 0.25);
+    
+    --border-color: rgba(102, 252, 241, 0.15);
+    --menu-bg: #07090e;
+    --menu-hover: rgba(102, 252, 241, 0.1);
+    
+    --card-hover-border: var(--accent);
+    --card-hover-bg: rgba(102, 252, 241, 0.03);
+    
     --led-off: #2e3033;
     --led-on: #39ff14;
-    --border-color: rgba(102, 252, 241, 0.2);
     --power-color: #ff3838;
     --v3-color: #ff9f43;
     --gnd-color: #576574;
     --input-color: #3498db;
     --output-color: #9b59b6;
+
+    /* Terminal/Log Theme-specific Variables */
+    --terminal-bg: #07090e;
+    --terminal-log-bg: #020204;
+    --terminal-text: #a0ffe6;
+    --terminal-border: #1a2238;
+}
+
+body.light-theme {
+    /* Light Mode Overrides */
+    --bg-color: #f5f6fa;
+    --card-bg: rgba(255, 255, 255, 0.95);
+    --text-color: #2f3640;
+    --text-bright: #1e272e;
+    --accent: #00a8ff;
+    --accent-dim: #0097e6;
+    --accent-glow: rgba(0, 168, 255, 0.2);
+    
+    --border-color: rgba(0, 168, 255, 0.15);
+    --menu-bg: #ffffff;
+    --menu-hover: rgba(0, 168, 255, 0.08);
+    
+    --card-hover-border: var(--accent);
+    --card-hover-bg: rgba(0, 168, 255, 0.02);
+
+    /* Terminal/Log Light Theme-specific Variables */
+    --terminal-bg: #ffffff;
+    --terminal-log-bg: #f8f9fa;
+    --terminal-text: #2f3640;
+    --terminal-border: rgba(0, 168, 255, 0.15);
 }
 
 body {
     background-color: var(--bg-color);
-    background-image: radial-gradient(circle at top right, rgba(102, 252, 241, 0.08), transparent 40%);
+    background-image: radial-gradient(circle at top right, var(--accent-glow), transparent 40%);
     color: var(--text-color);
     font-family: 'Outfit', 'Segoe UI', system-ui, sans-serif;
     margin: 0;
-    padding: 24px;
+    padding: 0;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     height: 100vh;
+    overflow: hidden;
+}
+
+/* Menu Bar Styles */
+#menu-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--menu-bg);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 40px;
+    box-sizing: border-box;
+    user-select: none;
+    z-index: 1000;
+}
+
+.menu-items {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.brand-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 16px;
+    padding-left: 4px;
+}
+
+.brand-name {
+    font-weight: 400;
+    font-size: 13px;
+    color: var(--text-bright);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.brand-name strong {
+    font-weight: 800;
+}
+
+.menu-item-group {
+    position: relative;
+}
+
+.menu-trigger {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.menu-trigger:hover, .menu-item-group:hover .menu-trigger {
+    background-color: var(--menu-hover);
+    color: var(--text-bright);
+}
+
+.menu-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background-color: var(--menu-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    padding: 6px 0;
+    min-width: 240px;
+    z-index: 1001;
+}
+
+.menu-item-group:hover .menu-dropdown {
+    display: block;
+}
+
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 16px 8px 32px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    position: relative;
+}
+
+.dropdown-item::before {
+    content: '';
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 10px;
+    border: solid transparent;
+    border-width: 0 2px 2px 0;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.dropdown-item.checked::before {
+    border-color: var(--accent);
+    transform: translateY(-60%) rotate(45deg);
+}
+
+.dropdown-item:hover {
+    background-color: var(--menu-hover);
+    color: var(--accent);
+}
+
+.menu-controls {
+    display: flex;
+    align-items: center;
+}
+
+.control-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.control-btn:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* Layout Container */
+#layout-container {
+    flex-grow: 1;
+    width: 100%;
+    position: relative;
+}
+
+/* Panel Layout Custom Flattening Styles */
+#board-container, #terminal-panel, #components-panel {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border-radius: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+}
+
+#board-container {
+    position: relative;
+    padding: 32px;
+    background-color: var(--bg-color);
+}
+
+#terminal-panel {
+    background-color: #020204;
+    padding: 12px;
+}
+
+#terminal-panel h3 {
+    margin: 0 0 8px 0 !important;
+}
+
+/* Workspace Panes styling */
+.workspace-pane {
+    background-color: var(--menu-bg);
+    padding: 16px;
+    overflow-y: auto;
+}
+
+.components-category h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent-dim);
+    margin: 0 0 12px 0;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 6px;
+}
+
+.components-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.component-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+.component-card:not(.disabled):hover {
+    border-color: var(--card-hover-border);
+    background-color: var(--card-hover-bg);
+    transform: translateX(4px);
+}
+
+.component-card.active {
+    border-color: var(--accent) !important;
+    background-color: var(--accent-glow) !important;
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.component-card.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.comp-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+}
+
+.comp-icon svg {
+    color: var(--accent);
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.component-card:hover .comp-icon svg {
+    color: var(--text-bright);
+    transform: scale(1.05);
+}
+
+.component-card.active .comp-icon svg {
+    color: var(--accent);
+}
+
+.comp-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.comp-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-bright);
+}
+
+.comp-desc {
+    font-size: 10px;
+    color: #888;
+}
+
+.active-badge {
+    margin-left: auto;
+    font-size: 9px;
+    background-color: var(--accent);
+    color: #000;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-weight: 800;
+}
+
+/* Floating Toolbar for Board Pane */
+#canvas-toolbar {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(18, 22, 28, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+.tool-btn {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tool-btn:hover {
+    background-color: rgba(255,255,255,0.05);
+    color: var(--text-bright);
+}
+
+.tool-btn.active {
+    background-color: var(--accent);
+    color: #000 !important;
+}
+
+.tool-separator {
+    width: 1px;
+    height: 16px;
+    background-color: var(--border-color);
+    margin: 0 4px;
+}
+
+.tool-badge {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent);
+    padding-right: 4px;
+    text-transform: uppercase;
+}
+
+/* Overriding Golden Layout Theme Defaults dynamically */
+.lm_header {
+    background-color: var(--menu-bg) !important;
+    box-shadow: none !important;
+}
+
+.lm_tab {
+    background-color: var(--bg-color) !important;
+    border-top: 1px solid var(--border-color) !important;
+    color: var(--text-color) !important;
+    font-family: inherit !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+}
+
+.lm_tab.lm_active {
+    background-color: var(--menu-bg) !important;
+    color: var(--accent) !important;
+    border-bottom: 2px solid var(--accent) !important;
+}
+
+.lm_splitter {
+    background-color: var(--border-color) !important;
+}
+
+.lm_content {
+    background-color: var(--bg-color) !important;
+    border: 1px solid var(--border-color) !important;
+}
+
+/* Seamless Board Pane (Frameless Integration) */
+.lm_stack.no-header > .lm_header {
+    display: none !important;
+}
+.lm_stack.no-header > .lm_items > .lm_content {
+    border: none !important;
+    background: transparent !important;
+    background-color: transparent !important;
 }
 
 header {
@@ -387,14 +801,15 @@ input:checked + .slider:before {
 
 /* Terminal Log Panel */
 #terminal-panel {
-    background-color: #07090e;
+    background-color: var(--terminal-bg);
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
     padding: 16px;
     display: flex;
     flex-direction: column;
-    box-shadow: inset 0 2px 10px rgba(0,0,0,0.8), 0 5px 15px rgba(0,0,0,0.4);
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.15), 0 5px 15px rgba(0,0,0,0.1);
     min-height: 0;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 #terminal-panel h3 {
@@ -411,11 +826,12 @@ input:checked + .slider:before {
     font-size: 11px;
     line-height: 1.5;
     overflow-y: auto;
-    background-color: #020204;
+    background-color: var(--terminal-log-bg);
     padding: 12px;
     border-radius: 6px;
-    color: #a0ffe6;
-    border: 1px solid #1a2238;
+    color: var(--terminal-text);
+    border: 1px solid var(--terminal-border);
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 #terminal-log div {
