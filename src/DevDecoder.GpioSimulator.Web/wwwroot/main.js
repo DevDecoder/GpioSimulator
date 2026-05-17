@@ -1,4 +1,5 @@
 import { GoldenLayout } from 'https://esm.sh/golden-layout@2.6.0';
+// panzoom loaded as UMD global via <script defer> in index.html
 
 let activeSchema = null;
 let ws = null;
@@ -6,7 +7,8 @@ const pinsStateMap = {};
 let activeTooltipPin = null;
 
 // Track Canvas Simulation States
-let activeTool = 'pointer';
+let activeTool = 'move';
+let panzoomInstance = null;
 const customBoards = [];
 
 // Initialize Layout Templates
@@ -15,11 +17,12 @@ const terminalPanel = document.getElementById('terminal-panel');
 const componentsPanel = document.getElementById('components-panel');
 const disconnectedOverlay = document.getElementById('disconnected-overlay');
 
-// Pre-cache core elements relative to the templates (even when detached)
+// Pre-cache core elements relative to the templates or document
 const boardVisual = boardContainer.querySelector('#visual-board');
+const canvasToolbar = document.getElementById('canvas-toolbar');
 const logTerminal = terminalPanel.querySelector('#terminal-log');
 const listContainer = componentsPanel.querySelector('#boards-list');
-const activeToolBadge = boardContainer.querySelector('#active-tool-badge');
+const activeToolBadge = document.getElementById('active-tool-badge');
 
 // Detach from DOM to make them dynamic templates
 boardContainer.remove();
@@ -39,6 +42,7 @@ resizeObserver.observe(layoutContainer);
 // Register Component Factories
 myLayout.registerComponentFactoryFunction('board', (container) => {
     container.element.appendChild(boardContainer);
+    
     // Add custom class to parent stack container to hide header / title
     setTimeout(() => {
         const stackElement = container.element.closest('.lm_stack');
@@ -57,36 +61,10 @@ myLayout.registerComponentFactoryFunction('components', (container) => {
 // Configure Window split
 const defaultLayoutConfig = {
     root: {
-        type: 'row',
-        content: [
-            {
-                type: 'component',
-                componentType: 'components',
-                title: 'Components',
-                width: 25,
-                isClosable: true
-            },
-            {
-                type: 'column',
-                width: 75,
-                content: [
-                    {
-                        type: 'component',
-                        componentType: 'board',
-                        title: 'Simulator Workspace',
-                        height: 65,
-                        isClosable: false
-                    },
-                    {
-                        type: 'component',
-                        componentType: 'logs',
-                        title: 'Real-Time Activity Log',
-                        height: 35,
-                        isClosable: true
-                    }
-                ]
-            }
-        ]
+        type: 'component',
+        componentType: 'board',
+        title: 'Simulator Workspace',
+        isClosable: false
     }
 };
 
@@ -171,35 +149,38 @@ async function syncPinStatesFromServer() {
 
 function renderBoard() {
     if (!boardVisual) return;
-    boardVisual.innerHTML = "";
-    boardVisual.style.position = "relative";
-    boardVisual.style.width = "100%";
-    boardVisual.style.maxWidth = `${activeSchema.visuals.svgWidth || 600}px`;
-    
+    boardVisual.innerHTML = '';
+
+    // Set explicit canvas dimensions so panzoom has a concrete bounding box
+    const bW = activeSchema.visuals.svgWidth  || 600;
+    const bH = activeSchema.visuals.svgHeight || 400;
+    boardVisual.style.width  = `${bW}px`;
+    boardVisual.style.height = `${bH}px`;
+
     const svgContainer = document.createElement('div');
-    svgContainer.className = "svg-board-container";
+    svgContainer.className = 'svg-board-container';
     svgContainer.innerHTML = activeSchema.visuals.svgTemplate;
     boardVisual.appendChild(svgContainer);
-    
+
     activeSchema.pins.forEach(pin => {
         const hotspot = document.createElement('div');
         hotspot.className = `pin-hotspot pin-phys-${pin.physical}`;
-        
-        const leftPct = (pin.x / (activeSchema.visuals.svgWidth || 600)) * 100;
-        const topPct = (pin.y / (activeSchema.visuals.svgHeight || 400)) * 100;
-        
+
+        const leftPct = (pin.x / bW) * 100;
+        const topPct  = (pin.y / bH) * 100;
+
         hotspot.style.left = `calc(${leftPct}% - 10px)`;
-        hotspot.style.top = `calc(${topPct}% - 10px)`;
-        
-        if (pin.name.includes("GND")) hotspot.classList.add("gnd");
-        else if (pin.name.includes("5V")) hotspot.classList.add("v5");
-        else if (pin.name.includes("3.3")) hotspot.classList.add("v3");
-        else hotspot.classList.add("gpio");
-        
+        hotspot.style.top  = `calc(${topPct}%  - 10px)`;
+
+        if (pin.name.includes('GND'))  hotspot.classList.add('gnd');
+        else if (pin.name.includes('5V'))  hotspot.classList.add('v5');
+        else if (pin.name.includes('3.3')) hotspot.classList.add('v3');
+        else hotspot.classList.add('gpio');
+
         const indexSpan = document.createElement('span');
         indexSpan.textContent = pin.physical;
         hotspot.appendChild(indexSpan);
-        
+
         hotspot.addEventListener('click', (e) => {
             e.stopPropagation();
             if (activeTool === 'pointer') {
@@ -208,13 +189,58 @@ function renderBoard() {
                 log(`Interacted with Pin ${pin.physical} with Delete Tool.`);
             }
         });
-        
+
         boardVisual.appendChild(hotspot);
         updatePinVisuals(pin.physical);
     });
-    
+
     log(`Rendered ${activeSchema.displayName} vector board successfully.`);
+
+    // Initialise or re-initialise panzoom then fit the board to screen
+    initPanZoom();
+    // rAF ensures the GL container is fully sized before we calculate fit
+    requestAnimationFrame(fitBoard);
 }
+
+// Initialise anvaka/panzoom on the canvas element
+function initPanZoom() {
+    if (panzoomInstance) {
+        panzoomInstance.dispose();
+        panzoomInstance = null;
+    }
+    panzoomInstance = panzoom(boardVisual, {
+        maxZoom: 4.0,
+        minZoom: 0.05,
+        zoomSpeed: 0.065,
+        // Allow panning only when: middle-click (any tool) OR left-click + Move tool
+        beforeMouseDown(e) {
+            if (e.button === 1) return false;            // middle-click always pans
+            if (e.button === 0 && activeTool === 'move') return false; // left + move tool
+            return true;                                  // block panning otherwise
+        }
+    });
+}
+
+// Fit the board to the available viewport with 5% padding on each side
+function fitBoard() {
+    if (!panzoomInstance || !activeSchema) return;
+    const cW = boardContainer.clientWidth;
+    const cH = boardContainer.clientHeight;
+    if (!cW || !cH) return;
+
+    const bW = activeSchema.visuals.svgWidth  || 600;
+    const bH = activeSchema.visuals.svgHeight || 400;
+
+    const scale = Math.min((cW * 0.9) / bW, (cH * 0.9) / bH, 4.0);
+    const tx = (cW - bW * scale) / 2;
+    const ty = (cH - bH * scale) / 2;
+
+    // zoomAbs FIRST (anchors scale at origin, leaving tx=0,ty=0)
+    // then moveTo translates to the centred position
+    panzoomInstance.zoomAbs(0, 0, scale);
+    panzoomInstance.moveTo(tx, ty);
+}
+
 
 function updatePinVisuals(physicalPin) {
     if (!boardVisual) return;
@@ -516,101 +542,87 @@ viewLogsBtn.onclick = () => {
     togglePanel('logs');
 };
 
-function togglePanel(componentType) {
-    if (!myLayout.rootItem) return;
-    
-    // Scan layout for existing instances
-    const existingItems = findComponentItems(myLayout.rootItem, componentType);
-    const isVisible = existingItems.length > 0;
-    
-    if (!isVisible) {
-        // Re-append to Golden Layout
-        const newItemConfig = {
-            type: 'component',
-            componentType: componentType,
-            title: componentType === 'components' ? 'Components' : 'Real-Time Activity Log',
-            isClosable: true
+// Panel visibility state — source of truth for layout reconstruction
+const panelVisible = { components: false, logs: false };
+
+// Build a clean layout config from current panel visibility state
+function buildLayoutConfig() {
+    const boardConfig = {
+        type: 'component',
+        componentType: 'board',
+        title: 'Simulator Workspace',
+        isClosable: false
+    };
+    const logsConfig = {
+        type: 'component',
+        componentType: 'logs',
+        title: 'Logs',
+        isClosable: true
+    };
+    const componentsConfig = {
+        type: 'component',
+        componentType: 'components',
+        title: 'Components',
+        width: 25,
+        isClosable: true
+    };
+
+    // Right side: board alone or board+logs stacked in a column
+    let rightSide;
+    if (panelVisible.logs) {
+        rightSide = {
+            type: 'column',
+            width: panelVisible.components ? 75 : 100,
+            content: [
+                { ...boardConfig, height: 65 },
+                { ...logsConfig,  height: 35 }
+            ]
         };
-        
-        if (componentType === 'components') {
-            if (myLayout.rootItem.type === 'row') {
-                // Add components to the left of the root row
-                myLayout.rootItem.addChild(newItemConfig, 0);
-            } else {
-                // Wrap current root in a row
-                const oldRootConfig = myLayout.saveLayout();
-                myLayout.loadLayout({
-                    root: {
-                        type: 'row',
-                        content: [
-                            newItemConfig,
-                            oldRootConfig.root
-                        ]
-                    }
-                });
-            }
-        } else if (componentType === 'logs') {
-            const boardItems = findComponentItems(myLayout.rootItem, 'board');
-            const boardItem = boardItems[0];
-            if (boardItem && boardItem.parent && boardItem.parent.type === 'column') {
-                // Add logs below the board in its existing parent column
-                boardItem.parent.addChild(newItemConfig);
-            } else {
-                // Wrap the board in a column with the logs below it
-                const oldRootConfig = myLayout.saveLayout();
-                
-                // Helper to replace the board component node inside the saved config with a column
-                function wrapBoardInConfig(node) {
-                    if (!node) return null;
-                    if (node.type === 'component' && node.componentType === 'board') {
-                        return {
-                            type: 'column',
-                            content: [
-                                node,
-                                newItemConfig
-                            ]
-                        };
-                    }
-                    if (node.content) {
-                        node.content = node.content.map(child => wrapBoardInConfig(child));
-                    }
-                    return node;
-                }
-                
-                const newRoot = wrapBoardInConfig(oldRootConfig.root);
-                myLayout.loadLayout({ root: newRoot });
-            }
-        }
     } else {
-        // Close from layout
-        existingItems.forEach(item => {
-            if (typeof item.remove === 'function') {
-                item.remove();
-            } else if (item.parent) {
-                item.parent.removeChild(item);
-            }
-        });
+        rightSide = { ...boardConfig, width: panelVisible.components ? 75 : 100 };
     }
+
+    // Wrap in a row if components pane is also visible
+    let rootNode;
+    if (panelVisible.components) {
+        rootNode = {
+            type: 'row',
+            content: [ componentsConfig, rightSide ]
+        };
+    } else {
+        rootNode = rightSide;
+    }
+
+    return {
+        settings: {
+            showPopoutIcon: false
+        },
+        dimensions: {
+            minItemWidth: 250,
+            minItemHeight: 150
+        },
+        root: rootNode
+    };
+}
+
+function togglePanel(componentType) {
+    panelVisible[componentType] = !panelVisible[componentType];
+    myLayout.loadLayout(buildLayoutConfig());
 }
 
 // Keep menu items state checked in sync when panes are closed manually or layout changes
 function syncViewMenuChecks() {
     if (!myLayout.rootItem) return;
-    
+
     const componentsVisible = findComponentItems(myLayout.rootItem, 'components').length > 0;
-    const logsVisible = findComponentItems(myLayout.rootItem, 'logs').length > 0;
-    
-    if (componentsVisible) {
-        viewComponentsBtn.classList.add('checked');
-    } else {
-        viewComponentsBtn.classList.remove('checked');
-    }
-    
-    if (logsVisible) {
-        viewLogsBtn.classList.add('checked');
-    } else {
-        viewLogsBtn.classList.remove('checked');
-    }
+    const logsVisible       = findComponentItems(myLayout.rootItem, 'logs').length > 0;
+
+    // Keep our state object in sync with manual closes (X button)
+    panelVisible.components = componentsVisible;
+    panelVisible.logs       = logsVisible;
+
+    viewComponentsBtn.classList.toggle('checked', componentsVisible);
+    viewLogsBtn.classList.toggle('checked', logsVisible);
 }
 
 // Bind synchronization to layout updates
@@ -697,11 +709,11 @@ const tools = [
 ];
 
 tools.forEach(tool => {
-    const btn = boardContainer.querySelector(`#tool-${tool.id}`);
+    const btn = document.getElementById(`tool-${tool.id}`);
     if (btn) {
         btn.onclick = () => {
             tools.forEach(t => {
-                const otherBtn = boardContainer.querySelector(`#tool-${t.id}`);
+                const otherBtn = document.getElementById(`tool-${t.id}`);
                 if (otherBtn) otherBtn.classList.remove('active');
             });
             btn.classList.add('active');
@@ -719,6 +731,29 @@ tools.forEach(tool => {
         };
     }
 });
+
+// ----------------------------------------------------
+// Zoom Controls
+// ----------------------------------------------------
+const zoomInBtn  = boardContainer.querySelector('#zoom-in');
+const zoomOutBtn = boardContainer.querySelector('#zoom-out');
+const zoomFitBtn = boardContainer.querySelector('#zoom-fit');
+
+if (zoomInBtn) zoomInBtn.onclick = () => {
+    if (!panzoomInstance) return;
+    const cx = boardContainer.clientWidth  / 2;
+    const cy = boardContainer.clientHeight / 2;
+    panzoomInstance.smoothZoom(cx, cy, 1.3);
+};
+
+if (zoomOutBtn) zoomOutBtn.onclick = () => {
+    if (!panzoomInstance) return;
+    const cx = boardContainer.clientWidth  / 2;
+    const cy = boardContainer.clientHeight / 2;
+    panzoomInstance.smoothZoom(cx, cy, 1 / 1.3);
+};
+
+if (zoomFitBtn) zoomFitBtn.onclick = fitBoard;
 
 // Setup
 loadBoard('raspberry_pi_5_breakout').then(setupWebSocket);

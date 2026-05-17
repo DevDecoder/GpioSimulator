@@ -231,7 +231,7 @@ body {
 
 #board-container {
     position: relative;
-    padding: 32px;
+    padding: 0 !important; /* Force no padding so layout is perfectly seamless */
     background-color: var(--bg-color);
 }
 
@@ -345,22 +345,30 @@ body {
     font-weight: 800;
 }
 
-/* Floating Toolbar for Board Pane */
+/* Center-aligned Operations Toolbar in the Top Menu/Title Bar */
 #canvas-toolbar {
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(18, 22, 28, 0.85);
-    backdrop-filter: blur(12px);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 4px 8px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    z-index: 100;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    gap: 8px;
+    height: 100%;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+#canvas-toolbar svg,
+#zoom-controls svg {
+    pointer-events: none; /* Prevents cursor highlighting or dragging SVGs */
+}
+
+/* User Selection Prevention for Premium UX */
+#canvas-toolbar,
+#zoom-controls,
+.tool-btn,
+.zoom-btn,
+.tool-badge,
+.brand-name {
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .tool-btn {
@@ -378,13 +386,13 @@ body {
 }
 
 .tool-btn:hover {
-    background-color: rgba(255,255,255,0.05);
+    background-color: rgba(255, 255, 255, 0.08);
     color: var(--text-bright);
 }
 
 .tool-btn.active {
     background-color: var(--accent);
-    color: #000 !important;
+    color: #000 !important; /* Premium high contrast text color */
 }
 
 .tool-separator {
@@ -395,11 +403,31 @@ body {
 }
 
 .tool-badge {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--accent);
     padding-right: 4px;
     text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Light-theme toolbar overrides */
+body.light-theme .tool-btn {
+    color: #4a4f5d;
+}
+
+body.light-theme .tool-btn:hover {
+    background-color: rgba(0, 0, 0, 0.08);
+    color: #1a1d23;
+}
+
+body.light-theme .tool-btn.active {
+    background-color: var(--accent);
+    color: #fff !important;
+}
+
+body.light-theme .tool-separator {
+    background-color: rgba(0, 0, 0, 0.15);
 }
 
 /* Overriding Golden Layout Theme Defaults dynamically */
@@ -436,7 +464,14 @@ body {
 .lm_stack.no-header > .lm_header {
     display: none !important;
 }
-.lm_stack.no-header > .lm_items > .lm_content {
+.lm_stack.no-header > .lm_items,
+.lm_stack.no-header > .lm_items > div,
+.lm_stack.no-header .lm_item,
+.lm_stack.no-header .lm_content {
+    top: 0 !important;
+    height: 100% !important;
+}
+.lm_stack.no-header .lm_content {
     border: none !important;
     background: transparent !important;
     background-color: transparent !important;
@@ -486,6 +521,7 @@ select:hover {
     border-color: #fff;
 }
 
+/* Obsolete Grid Layout (Golden Layout uses absolute positioning, this interfered with #layout-container sizing)
 main {
     display: grid;
     grid-template-columns: 7fr 3fr;
@@ -493,38 +529,76 @@ main {
     flex-grow: 1;
     min-height: 0;
 }
+*/
 
 #board-container {
+    position: relative;
     background-color: var(--card-bg);
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.05);
-    padding: 24px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     overflow: hidden;
     backdrop-filter: blur(8px);
+    /* No padding — panzoom positions the canvas via transform */
 }
 
 #visual-board {
-    display: inline-block;
-    max-width: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    cursor: grab; /* Set default grab cursor for the Move tool */
+    /* width/height set explicitly by JS from schema dimensions */
 }
 
 .svg-board-container {
+    display: block;
     width: 100%;
     height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px;
-    overflow: hidden;
 }
 
 .svg-board-container svg {
+    display: block;
     filter: drop-shadow(0 15px 25px rgba(0,0,0,0.6));
 }
+
+/* Floating Zoom Controls Pill */
+#zoom-controls {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    background: rgba(18, 22, 28, 0.88);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 4px;
+    display: flex;
+    gap: 2px;
+    z-index: 200;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+body.light-theme #zoom-controls {
+    background: rgba(240, 242, 248, 0.92);
+}
+
+.zoom-btn {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, transform 0.1s;
+}
+
+.zoom-btn:hover  { background: rgba(255,255,255,0.12); color: var(--accent); }
+.zoom-btn:active { transform: scale(0.9); }
+
 
 /* Geo-mapped Interactive Pin Hotspots */
 .pin-hotspot {
