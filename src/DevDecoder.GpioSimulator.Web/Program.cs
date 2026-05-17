@@ -40,8 +40,8 @@ app.UseStaticFiles(new StaticFileOptions
 });
 app.UseWebSockets();
 
-var clients = new ConcurrentDictionary<Guid, (WebSocket Socket, string Type, string Scheme)>();
-var pinStates = new ConcurrentDictionary<int, string>(); // Stores mode:value
+var clients = new ConcurrentDictionary<Guid, ClientConnection>();
+var pinStates = new ConcurrentDictionary<int, PinState>();
 
 var mappingLock = new object();
 var activeBoardId = "raspberry_pi_5_breakout";
@@ -58,6 +58,28 @@ void LoadBoardMapping(string boardId)
     try
     {
         string gscPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "components", $"{boardId}.gsc");
+        if (!File.Exists(gscPath))
+        {
+            // Fallback for bin/Debug or publish directories
+            var dir = new DirectoryInfo(app.Environment.ContentRootPath);
+            while (dir != null)
+            {
+                var candidate1 = Path.Combine(dir.FullName, "src", "DevDecoder.GpioSimulator.Web", "wwwroot", "components", $"{boardId}.gsc");
+                if (File.Exists(candidate1))
+                {
+                    gscPath = candidate1;
+                    break;
+                }
+                var candidate2 = Path.Combine(dir.FullName, "wwwroot", "components", $"{boardId}.gsc");
+                if (File.Exists(candidate2))
+                {
+                    gscPath = candidate2;
+                    break;
+                }
+                dir = dir.Parent;
+            }
+        }
+
         if (!File.Exists(gscPath))
         {
             Log($"GSC file not found: {gscPath}");
@@ -136,7 +158,10 @@ void CancelShutdownTimer()
 
 app.MapGet("/api/status", () => Results.Json(new { status = "online" }));
 
-app.MapGet("/api/pins", () => Results.Json(pinStates));
+app.MapGet("/api/pins", () => Results.Json(pinStates.ToDictionary(
+    kvp => kvp.Key,
+    kvp => $"{kvp.Value.Mode}:{kvp.Value.Value}:{kvp.Value.OwnerId?.ToString() ?? ""}:{kvp.Value.OwnerType}"
+)));
 
 app.MapPost("/api/board/active", (HttpContext context) =>
 {
@@ -178,7 +203,14 @@ app.Use(async (context, next) =>
             Log($"Client connected: {clientId} (Type: {clientType}, Scheme: {clientScheme})");
 
             using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-            clients.TryAdd(clientId, (webSocket, clientType, clientScheme));
+            var connection = new ClientConnection
+            {
+                ClientId = clientId,
+                Socket = webSocket,
+                Type = clientType,
+                Scheme = clientScheme
+            };
+            clients.TryAdd(clientId, connection);
 
             if (clientType == "controller")
             {
@@ -187,6 +219,14 @@ app.Use(async (context, next) =>
             
             try
             {
+                // Send connection info
+                var connMsg = JsonSerializer.Serialize(new { 
+                    action = "connected", 
+                    clientId = clientId.ToString() 
+                });
+                var connBytes = Encoding.UTF8.GetBytes(connMsg);
+                await webSocket.SendAsync(new ArraySegment<byte>(connBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+
                 // Send initial states to freshly opened client
                 foreach (var kvp in pinStates)
                 {
@@ -201,58 +241,84 @@ app.Use(async (context, next) =>
                             }
                         }
                     }
-                    var parts = kvp.Value.Split(':');
-                    var initMsg = JsonSerializer.Serialize(new { action = "state_change", pin = targetPin, mode = parts[0], value = parts[1] });
+                    var initMsg = JsonSerializer.Serialize(new { 
+                        action = "state_change", 
+                        pin = targetPin, 
+                        mode = kvp.Value.Mode, 
+                        value = kvp.Value.Value,
+                        ownerId = kvp.Value.OwnerId?.ToString() ?? "",
+                        ownerType = kvp.Value.OwnerType
+                    });
                     var bytes = Encoding.UTF8.GetBytes(initMsg);
                     await webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
                 }
 
                 var buffer = new byte[1024 * 4];
                 
-                string SerializeMessageForClient(string rawJson, string destType, string destScheme)
+                async Task BroadcastPinState(int pPin, PinState state)
                 {
-                    try
+                    foreach (var c in clients.Values)
                     {
-                        var node = JsonNode.Parse(rawJson);
-                        if (node != null && node["pin"] != null)
+                        if (c.Socket.State == WebSocketState.Open)
                         {
-                            int origPin = node["pin"]!.GetValue<int>();
-                            
-                            // Map incoming pin to a physical pin (Board numbering scheme)
-                            int physPin = origPin;
-                            if (clientScheme == "Logical")
+                            int targetPin = pPin;
+                            if (c.Scheme == "Logical")
                             {
                                 lock (mappingLock)
                                 {
-                                    if (activeLogToPhys.TryGetValue(origPin, out int phys))
-                                    {
-                                        physPin = phys;
-                                    }
-                                }
-                            }
-                            
-                            // Map physical pin to destination scheme
-                            int targetPin = physPin;
-                            if (destScheme == "Logical")
-                            {
-                                lock (mappingLock)
-                                {
-                                    if (activePhysToLog.TryGetValue(physPin, out int log))
+                                    if (activePhysToLog.TryGetValue(pPin, out int log))
                                     {
                                         targetPin = log;
                                     }
                                 }
                             }
-                            
-                            node["pin"] = targetPin;
-                            return node.ToJsonString();
+                            var msg = JsonSerializer.Serialize(new {
+                                action = "state_change",
+                                pin = targetPin,
+                                mode = state.Mode,
+                                value = state.Value,
+                                ownerId = state.OwnerId?.ToString() ?? "",
+                                ownerType = state.OwnerType
+                            });
+                            var bytes = Encoding.UTF8.GetBytes(msg);
+                            try
+                            {
+                                await c.Socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
+                            catch { }
                         }
                     }
-                    catch
+                }
+
+                async Task BroadcastPinClose(int pPin)
+                {
+                    foreach (var c in clients.Values)
                     {
-                        // Fallback to original JSON if parsing/processing fails
+                        if (c.Socket.State == WebSocketState.Open)
+                        {
+                            int targetPin = pPin;
+                            if (c.Scheme == "Logical")
+                            {
+                                lock (mappingLock)
+                                {
+                                    if (activePhysToLog.TryGetValue(pPin, out int log))
+                                    {
+                                        targetPin = log;
+                                    }
+                                }
+                            }
+                            var msg = JsonSerializer.Serialize(new {
+                                action = "close",
+                                pin = targetPin
+                            });
+                            var bytes = Encoding.UTF8.GetBytes(msg);
+                            try
+                            {
+                                await c.Socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
+                            catch { }
+                        }
                     }
-                    return rawJson;
                 }
 
                 while (webSocket.State == WebSocketState.Open)
@@ -264,14 +330,29 @@ app.Use(async (context, next) =>
                     }
                     
                     var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    var json = JsonDocument.Parse(message);
+                    using var json = JsonDocument.Parse(message);
                     var root = json.RootElement;
                     if (root.TryGetProperty("action", out var actionProp))
                     {
                         var action = actionProp.GetString();
+                        
+                        if (action == "log")
+                        {
+                            var val = root.GetProperty("value").GetString() ?? "";
+                            Log(val);
+                            continue;
+                        }
+                        
                         var pin = root.GetProperty("pin").GetInt32();
+                        string? requestId = null;
+                        if (root.TryGetProperty("requestId", out var rProp))
+                        {
+                            requestId = rProp.GetString();
+                        }
                         
                         int physPin = pin;
+                        bool isValid = true;
+                        
                         if (clientScheme == "Logical")
                         {
                             lock (mappingLock)
@@ -280,69 +361,171 @@ app.Use(async (context, next) =>
                                 {
                                     physPin = phys;
                                 }
+                                else
+                                {
+                                    isValid = false;
+                                }
                             }
                         }
-
-                        if (action == "log")
+                        else
                         {
-                            var val = root.GetProperty("value").GetString() ?? "";
-                            Log(val);
+                            lock (mappingLock)
+                            {
+                                if (!activePhysToLog.ContainsKey(pin))
+                                {
+                                    isValid = false;
+                                }
+                            }
+                        }
+                        
+                        if (!isValid)
+                        {
+                            if (action == "open" && requestId != null)
+                            {
+                                var resp = JsonSerializer.Serialize(new {
+                                    action = "open_response",
+                                    requestId = requestId,
+                                    status = "error",
+                                    errorType = "ArgumentException",
+                                    errorMessage = $"Pin {pin} is not valid for this board or scheme."
+                                });
+                                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
+                            else
+                            {
+                                Log($"Rejecting action '{action}' for invalid pin {pin}.");
+                            }
+                            continue;
+                        }
+
+                        if (action == "open")
+                        {
+                            var mode = root.GetProperty("mode").GetString() ?? "Input";
+                            
+                            // Check if pin is already open
+                            if (pinStates.TryGetValue(physPin, out var existingState))
+                            {
+                                // If already open by same client, succeed immediately
+                                if (existingState.OwnerId == clientId)
+                                {
+                                    existingState.Mode = mode;
+                                    var defaultVal = mode == "InputPullUp" ? "High" : "Low";
+                                    existingState.Value = defaultVal;
+                                    
+                                    if (requestId != null)
+                                    {
+                                        var resp = JsonSerializer.Serialize(new {
+                                            action = "open_response",
+                                            requestId = requestId,
+                                            status = "success"
+                                        });
+                                        await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                                    }
+                                    
+                                    await BroadcastPinState(physPin, existingState);
+                                    Log($"Physical Pin {physPin} reconfigured to {mode} by its owner {clientId} ({clientType})");
+                                    continue;
+                                }
+                                
+                                // Check if owner is active
+                                bool ownerActive = existingState.OwnerId.HasValue && clients.ContainsKey(existingState.OwnerId.Value);
+                                if (ownerActive)
+                                {
+                                    if (requestId != null)
+                                    {
+                                        var resp = JsonSerializer.Serialize(new {
+                                            action = "open_response",
+                                            requestId = requestId,
+                                            status = "error",
+                                            errorType = "InvalidOperationException",
+                                            errorMessage = $"Pin {physPin} is already opened by another controller ({existingState.OwnerType})."
+                                        });
+                                        await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                                    }
+                                    Log($"Rejecting open for pin {physPin}: Owned by active client {existingState.OwnerId} ({existingState.OwnerType})");
+                                    continue;
+                                }
+                            }
+                            
+                            // Pin is not open, or owner is dead -> Open and claim it!
+                            var defaultValStr = mode == "InputPullUp" ? "High" : "Low";
+                            var state = new PinState
+                            {
+                                Mode = mode,
+                                Value = defaultValStr,
+                                OwnerId = clientId,
+                                OwnerType = clientType
+                            };
+                            pinStates[physPin] = state;
+                            
+                            if (requestId != null)
+                            {
+                                var resp = JsonSerializer.Serialize(new {
+                                    action = "open_response",
+                                    requestId = requestId,
+                                    status = "success"
+                                });
+                                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
+                            
+                            await BroadcastPinState(physPin, state);
+                            Log($"Physical Pin {physPin} opened in {mode} mode by client {clientId} ({clientType})");
                         }
                         else if (action == "write" || action == "read")
                         {
                             var val = root.GetProperty("value").GetString() ?? "Low";
-                            pinStates.AddOrUpdate(physPin, $"Unknown:{val}", (k, old) => $"{old.Split(':')[0]}:{val}");
-                            Log($"Physical Pin {physPin} state set to: {val}");
+                            
+                            if (pinStates.TryGetValue(physPin, out var state))
+                            {
+                                if (state.OwnerId != clientId)
+                                {
+                                    Log($"Unauthorized write/read for pin {physPin} by client {clientId} ({clientType}). Owned by {state.OwnerId} ({state.OwnerType})");
+                                    continue;
+                                }
+                                state.Value = val;
+                                Log($"Physical Pin {physPin} state set to: {val} by owner {clientId}");
+                                await BroadcastPinState(physPin, state);
+                            }
+                            else
+                            {
+                                Log($"Write/read ignored: Pin {physPin} is not open.");
+                            }
                         }
                         else if (action == "mode")
                         {
                             var mode = root.GetProperty("mode").GetString() ?? "Input";
                             var val = mode == "InputPullUp" ? "High" : "Low";
-                            pinStates.AddOrUpdate(physPin, $"{mode}:{val}", (k, old) => $"{mode}:{val}");
-                            Log($"Physical Pin {physPin} mode configured: {mode} (Default value: {val})");
-
-                            // Respond back to the sender socket with the updated pin value
-                            var responseMsg = JsonSerializer.Serialize(new { action = "write", pin = pin, value = val });
-                            var responseBytes = Encoding.UTF8.GetBytes(responseMsg);
-                            await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Text, true, CancellationToken.None);
-
-                            // Also broadcast the value change to all other connected clients
-                            foreach (var client in clients)
+                            
+                            if (pinStates.TryGetValue(physPin, out var state))
                             {
-                                if (client.Value.Socket.State == WebSocketState.Open && client.Value.Socket != webSocket)
+                                if (state.OwnerId != clientId)
                                 {
-                                    int targetPin = physPin;
-                                    if (client.Value.Scheme == "Logical")
-                                    {
-                                        lock (mappingLock)
-                                        {
-                                            if (activePhysToLog.TryGetValue(physPin, out int log))
-                                            {
-                                                targetPin = log;
-                                            }
-                                        }
-                                    }
-                                    var broadcastMsg = JsonSerializer.Serialize(new { action = "write", pin = targetPin, value = val });
-                                    var broadcastBytes = Encoding.UTF8.GetBytes(broadcastMsg);
-                                    await client.Value.Socket.SendAsync(new ArraySegment<byte>(broadcastBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                                    Log($"Unauthorized mode change for pin {physPin} by client {clientId} ({clientType}). Owned by {state.OwnerId} ({state.OwnerType})");
+                                    continue;
                                 }
+                                state.Mode = mode;
+                                state.Value = val;
+                                Log($"Physical Pin {physPin} mode configured to: {mode} by owner {clientId}");
+                                await BroadcastPinState(physPin, state);
+                            }
+                            else
+                            {
+                                Log($"Mode change ignored: Pin {physPin} is not open.");
                             }
                         }
                         else if (action == "close")
                         {
-                            pinStates.TryRemove(physPin, out _);
-                            Log($"Physical Pin {physPin} closed");
-                        }
-                    }
-
-                    // Broadcast message to all other connected sockets
-                    foreach (var client in clients)
-                    {
-                        if (client.Value.Socket.State == WebSocketState.Open && client.Value.Socket != webSocket)
-                        {
-                            string translatedMsg = SerializeMessageForClient(message, client.Value.Type, client.Value.Scheme);
-                            var transBytes = Encoding.UTF8.GetBytes(translatedMsg);
-                            await client.Value.Socket.SendAsync(new ArraySegment<byte>(transBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                            if (pinStates.TryGetValue(physPin, out var state))
+                            {
+                                if (state.OwnerId != clientId)
+                                {
+                                    Log($"Unauthorized close for pin {physPin} by client {clientId} ({clientType}). Owned by {state.OwnerId} ({state.OwnerType})");
+                                    continue;
+                                }
+                                pinStates.TryRemove(physPin, out _);
+                                Log($"Physical Pin {physPin} closed by owner {clientId}");
+                                await BroadcastPinClose(physPin);
+                            }
                         }
                     }
                 }
@@ -377,3 +560,19 @@ app.Use(async (context, next) =>
 StartShutdownTimer(15);
 
 app.Run();
+
+public class ClientConnection
+{
+    public Guid ClientId { get; set; }
+    public WebSocket Socket { get; set; } = null!;
+    public string Type { get; set; } = "ui";
+    public string Scheme { get; set; } = "Board";
+}
+
+public class PinState
+{
+    public string Mode { get; set; } = "None";
+    public string Value { get; set; } = "Low";
+    public Guid? OwnerId { get; set; }
+    public string OwnerType { get; set; } = "";
+}

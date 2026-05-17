@@ -17,6 +17,16 @@ namespace System.Device.Gpio
         private readonly ConcurrentDictionary<int, ConcurrentBag<(PinEventTypes Types, PinChangeEventHandler Handler)>> _pinCallbacks = 
             new ConcurrentDictionary<int, ConcurrentBag<(PinEventTypes Types, PinChangeEventHandler Handler)>>();
         
+        private class OpenPinResult
+        {
+            public bool Success { get; set; }
+            public string ErrorType { get; set; }
+            public string ErrorMessage { get; set; }
+        }
+
+        private readonly ConcurrentDictionary<string, TaskCompletionSource<OpenPinResult>> _pendingRequests = 
+            new ConcurrentDictionary<string, TaskCompletionSource<OpenPinResult>>();
+
         private ClientWebSocket _wsClient;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private static readonly HttpClient _httpClient = new HttpClient();
@@ -77,6 +87,30 @@ namespace System.Device.Gpio
             EnsureServerStartedAndConnected().GetAwaiter().GetResult();
         }
 
+        public bool IsValidPin(int pinNumber)
+        {
+            if (NumberingScheme == PinNumberingScheme.Logical)
+            {
+                return pinNumber >= 0 && pinNumber <= 27;
+            }
+            else
+            {
+                var validPhysPins = new System.Collections.Generic.HashSet<int> 
+                { 
+                    3, 5, 7, 8, 10, 11, 12, 13, 15, 16, 18, 19, 21, 22, 23, 24, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 40 
+                };
+                return validPhysPins.Contains(pinNumber);
+            }
+        }
+
+        private void ValidatePin(int pinNumber)
+        {
+            if (!IsValidPin(pinNumber))
+            {
+                throw new ArgumentException($"Pin {pinNumber} is not a valid GPIO pin under scheme {NumberingScheme}.");
+            }
+        }
+
         private async Task EnsureServerStartedAndConnected()
         {
             string serverUrl = "http://127.0.0.1:5050";
@@ -133,15 +167,47 @@ namespace System.Device.Gpio
             try
             {
                 _wsClient = new ClientWebSocket();
-                await _wsClient.ConnectAsync(new Uri($"ws://127.0.0.1:5050/ws?client=controller&scheme={NumberingScheme}"), CancellationToken.None);
+                
+                // Connection attempt with 5-second timeout
+                using (var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                {
+                    await _wsClient.ConnectAsync(new Uri($"ws://127.0.0.1:5050/ws?client=controller&scheme={NumberingScheme}"), connectCts.Token);
+                }
                 
                 // Start background listener
                 _ = Task.Run(ReceiveWebSocketMessages);
             }
             catch (Exception ex)
             {
-                Log("Error", $"Client failed to connect to WebSocket: {ex.Message}");
+                _wsClient?.Dispose();
+                _wsClient = null;
+                throw new InvalidOperationException("Failed to connect to the simulator server driver over WebSocket.", ex);
             }
+        }
+
+        private static string GetJsonValue(string msg, string key)
+        {
+            int index = msg.IndexOf($"\"{key}\":");
+            if (index == -1) return null;
+            index += key.Length + 3; // skip "key":
+            
+            // Trim leading space/quotes
+            while (index < msg.Length && (msg[index] == ' ' || msg[index] == '"'))
+            {
+                index++;
+            }
+            
+            int end = index;
+            while (end < msg.Length && msg[end] != '"' && msg[end] != ',' && msg[end] != '}' && msg[end] != '\r' && msg[end] != '\n')
+            {
+                end++;
+            }
+            
+            if (end > index)
+            {
+                return msg.Substring(index, end - index).Trim();
+            }
+            return null;
         }
 
         private async Task ReceiveWebSocketMessages()
@@ -156,35 +222,50 @@ namespace System.Device.Gpio
 
                     var msg = Encoding.UTF8.GetString(buffer, 0, result.Count);
                     
-                    // Manual JSON Parsing to avoid any library dependency on .NET Standard 2.0
-                    if (msg.Contains("\"pin\":") && msg.Contains("\"value\":\""))
+                    if (msg.Contains("\"action\":\"open_response\""))
                     {
-                        int pinIndex = msg.IndexOf("\"pin\":") + 6;
-                        int commaIndex = msg.IndexOf(",", pinIndex);
-                        if (commaIndex == -1)
+                        var requestId = GetJsonValue(msg, "requestId");
+                        var status = GetJsonValue(msg, "status");
+                        var errorType = GetJsonValue(msg, "errorType");
+                        var errorMessage = GetJsonValue(msg, "errorMessage");
+                        
+                        if (requestId != null && _pendingRequests.TryGetValue(requestId, out var tcs))
                         {
-                            commaIndex = msg.IndexOf("}", pinIndex);
-                        }
-
-                        if (commaIndex > pinIndex && int.TryParse(msg.Substring(pinIndex, commaIndex - pinIndex).Trim(), out int pin))
-                        {
-                            int valIndex = msg.IndexOf("\"value\":\"") + 9;
-                            int endValIndex = msg.IndexOf("\"", valIndex);
-                            if (endValIndex > valIndex)
+                            tcs.TrySetResult(new OpenPinResult
                             {
-                                string valStr = msg.Substring(valIndex, endValIndex - valIndex);
-                                PinValue val = valStr == "High" ? PinValue.High : PinValue.Low;
+                                Success = status == "success",
+                                ErrorType = errorType,
+                                ErrorMessage = errorMessage
+                            });
+                        }
+                    }
+                    else if (msg.Contains("\"action\":\"state_change\"") || msg.Contains("\"action\":\"write\""))
+                    {
+                        var pinStr = GetJsonValue(msg, "pin");
+                        var valStr = GetJsonValue(msg, "value");
+                        
+                        if (int.TryParse(pinStr, out int pin) && valStr != null)
+                        {
+                            PinValue val = valStr == "High" ? PinValue.High : PinValue.Low;
+                            
+                            PinValue oldVal = _pinValues.GetOrAdd(pin, PinValue.Low);
+                            if (oldVal != val)
+                            {
+                                _pinValues[pin] = val;
                                 
-                                PinValue oldVal = _pinValues.GetOrAdd(pin, PinValue.Low);
-                                if (oldVal != val)
-                                {
-                                    _pinValues[pin] = val;
-                                    
-                                    // Trigger callbacks on edge transition
-                                    PinEventTypes occurredType = val == PinValue.High ? PinEventTypes.Rising : PinEventTypes.Falling;
-                                    FireCallbacks(pin, occurredType);
-                                }
+                                // Trigger callbacks on edge transition
+                                PinEventTypes occurredType = val == PinValue.High ? PinEventTypes.Rising : PinEventTypes.Falling;
+                                FireCallbacks(pin, occurredType);
                             }
+                        }
+                    }
+                    else if (msg.Contains("\"action\":\"close\""))
+                    {
+                        var pinStr = GetJsonValue(msg, "pin");
+                        if (int.TryParse(pinStr, out int pin))
+                        {
+                            _openPins.TryRemove(pin, out _);
+                            _pinValues.TryRemove(pin, out _);
                         }
                     }
                 }
@@ -217,6 +298,17 @@ namespace System.Device.Gpio
             }
         }
 
+        private void NotifyPinOpen(int pin, PinMode mode, string requestId)
+        {
+            if (_wsClient != null && _wsClient.State == WebSocketState.Open)
+            {
+                var payload = $"{{\"action\":\"open\",\"pin\":{pin},\"mode\":\"{mode}\",\"requestId\":\"{requestId}\"}}";
+                var bytes = Encoding.UTF8.GetBytes(payload);
+                _wsClient.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None)
+                         .GetAwaiter().GetResult();
+            }
+        }
+
         public virtual void OpenPin(int pinNumber)
         {
             OpenPin(pinNumber, PinMode.Input);
@@ -224,22 +316,60 @@ namespace System.Device.Gpio
 
         public virtual void OpenPin(int pinNumber, PinMode mode)
         {
+            ValidatePin(pinNumber);
+            
+            if (_wsClient != null && _wsClient.State == WebSocketState.Open)
+            {
+                var requestId = Guid.NewGuid().ToString();
+                var tcs = new TaskCompletionSource<OpenPinResult>();
+                _pendingRequests[requestId] = tcs;
+                
+                NotifyPinOpen(pinNumber, mode, requestId);
+                
+                if (!tcs.Task.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    _pendingRequests.TryRemove(requestId, out _);
+                    throw new TimeoutException($"Timeout waiting for simulator server to open pin {pinNumber}.");
+                }
+                
+                _pendingRequests.TryRemove(requestId, out _);
+                
+                var result = tcs.Task.Result;
+                if (!result.Success)
+                {
+                    if (result.ErrorType == "ArgumentException")
+                    {
+                        throw new ArgumentException(result.ErrorMessage);
+                    }
+                    else if (result.ErrorType == "InvalidOperationException")
+                    {
+                        throw new InvalidOperationException(result.ErrorMessage);
+                    }
+                    else
+                    {
+                        throw new Exception(result.ErrorMessage);
+                    }
+                }
+            }
+            else
+            {
+                throw new InvalidOperationException("Failed to open pin: The GpioController is not connected to the simulator driver.");
+            }
+
             _openPins[pinNumber] = mode;
             var defaultVal = mode == PinMode.InputPullUp ? PinValue.High : PinValue.Low;
             _pinValues[pinNumber] = defaultVal;
-            NotifyPinChange(pinNumber, "mode", mode.ToString());
         }
 
         public virtual void OpenPin(int pinNumber, PinMode mode, PinValue initialValue)
         {
-            _openPins[pinNumber] = mode;
-            _pinValues[pinNumber] = initialValue;
-            NotifyPinChange(pinNumber, "mode", mode.ToString());
-            NotifyPinChange(pinNumber, "write", initialValue.ToString());
+            OpenPin(pinNumber, mode);
+            Write(pinNumber, initialValue);
         }
 
         public virtual void ClosePin(int pinNumber)
         {
+            ValidatePin(pinNumber);
             if (_openPins.TryRemove(pinNumber, out _))
             {
                 NotifyPinChange(pinNumber, "close", "");
@@ -249,6 +379,7 @@ namespace System.Device.Gpio
 
         public virtual void Write(int pinNumber, PinValue value)
         {
+            ValidatePin(pinNumber);
             if (!_openPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
             _pinValues[pinNumber] = value;
@@ -265,6 +396,7 @@ namespace System.Device.Gpio
 
         public virtual PinValue Read(int pinNumber)
         {
+            ValidatePin(pinNumber);
             if (!_openPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
             return _pinValues.TryGetValue(pinNumber, out var val) ? val : PinValue.Low;
@@ -282,6 +414,7 @@ namespace System.Device.Gpio
 
         public virtual void SetPinMode(int pinNumber, PinMode mode)
         {
+            ValidatePin(pinNumber);
             if (!_openPins.ContainsKey(pinNumber))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
             _openPins[pinNumber] = mode;
@@ -293,6 +426,7 @@ namespace System.Device.Gpio
 
         public virtual PinMode GetPinMode(int pinNumber)
         {
+            ValidatePin(pinNumber);
             if (!_openPins.TryGetValue(pinNumber, out var mode))
                 throw new InvalidOperationException($"Pin {pinNumber} is not open.");
             return mode;
@@ -300,6 +434,7 @@ namespace System.Device.Gpio
 
         public virtual bool IsPinOpen(int pinNumber)
         {
+            ValidatePin(pinNumber);
             return _openPins.ContainsKey(pinNumber);
         }
 
@@ -424,7 +559,7 @@ namespace System.Device.Gpio
                     var binPath = Path.Combine(webAppDir, "bin");
                     if (Directory.Exists(binPath))
                     {
-                        var configurations = new[] { "Release", "Debug" };
+                        var configurations = new[] { "Debug", "Release" };
                         foreach (var config in configurations)
                         {
                             var configPath = Path.Combine(binPath, config);

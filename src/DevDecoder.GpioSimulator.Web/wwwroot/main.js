@@ -5,6 +5,7 @@ let activeSchema = null;
 let ws = null;
 const pinsStateMap = {};
 let activeTooltipPin = null;
+let myClientId = null;
 
 // Track Canvas Simulation States
 let activeTool = 'move';
@@ -136,7 +137,9 @@ async function syncPinStatesFromServer() {
                 const parts = stateStr.split(':');
                 pinsStateMap[pin] = {
                     mode: parts[0],
-                    value: parts[1]
+                    value: parts[1],
+                    ownerId: parts[2] || null,
+                    ownerType: parts[3] || ""
                 };
                 updatePinVisuals(pin);
             });
@@ -303,16 +306,58 @@ function refreshTooltipContent(pin, anchorEl) {
     let logicalStr = "N/A (Power / GND)";
     let controlSection = "";
     
+    let ownershipStr = "Unopened";
+    let ownershipClass = "badge-unopened";
+    let canEdit = false;
+    
+    const isOpened = state.mode && state.mode !== "None" && state.ownerId;
+    if (!isOpened) {
+        ownershipStr = "Unopened (Available)";
+        ownershipClass = "badge-available";
+        canEdit = true;
+    } else if (state.ownerId === myClientId) {
+        ownershipStr = "Opened by You";
+        ownershipClass = "badge-owned-by-me";
+        canEdit = true;
+    } else {
+        ownershipStr = `${state.ownerType || "Controller"} (${state.ownerId ? state.ownerId.substring(0, 8) : "unknown"})`;
+        ownershipClass = "badge-owned-by-other";
+        canEdit = false;
+    }
+    
+    let modeSelector = "";
+    
     if (pin.logical !== null) {
         logicalStr = `GPIO ${pin.logical}`;
         const modeLower = state.mode ? state.mode.toLowerCase() : "";
         
+        const modes = ["None", "Input", "Output", "InputPullUp", "InputPullDown"];
+        const modeLabels = {
+            "None": "None (Closed)",
+            "Input": "Input",
+            "Output": "Output",
+            "InputPullUp": "Input Pull-Up",
+            "InputPullDown": "Input Pull-Down"
+        };
+        const options = modes.map(m => {
+            const selected = (state.mode || "None") === m ? "selected" : "";
+            return `<option value="${m}" ${selected}>${modeLabels[m]}</option>`;
+        }).join("");
+        
+        const disabledAttr = canEdit ? "" : "disabled";
+        modeSelector = `
+            <select id="tooltip-mode-selector" class="mode-select" ${disabledAttr}>
+                ${options}
+            </select>
+        `;
+        
         if (modeLower === "input") {
             const checkedAttr = state.value === "High" ? "checked" : "";
+            const toggleDisabled = canEdit ? "" : "disabled";
             controlSection = `
-                <div class="tooltip-control">
+                <div class="tooltip-control ${canEdit ? '' : 'disabled'}">
                     <label class="switch">
-                        <input type="checkbox" id="tooltip-state-toggle" ${checkedAttr}>
+                        <input type="checkbox" id="tooltip-state-toggle" ${checkedAttr} ${toggleDisabled}>
                         <span class="slider round"></span>
                     </label>
                     <div class="control-text">
@@ -322,22 +367,24 @@ function refreshTooltipContent(pin, anchorEl) {
                 </div>
             `;
         } else if (modeLower === "inputpulldown") {
+            const btnDisabled = canEdit ? "" : "disabled";
             controlSection = `
-                <div class="tooltip-control">
-                    <button class="push-btn" id="tooltip-state-push">Drive HIGH</button>
+                <div class="tooltip-control ${canEdit ? '' : 'disabled'}">
+                    <button class="push-btn" id="tooltip-state-push" ${btnDisabled}>Drive HIGH</button>
                     <div class="control-text">
                         <span class="control-label">Pull-Down Push Button</span>
-                        <span class="control-sub">Hold to drive HIGH (3.3V/5V)</span>
+                        <span class="control-sub">Hold to drive HIGH</span>
                     </div>
                 </div>
             `;
         } else if (modeLower === "inputpullup") {
+            const btnDisabled = canEdit ? "" : "disabled";
             controlSection = `
-                <div class="tooltip-control">
-                    <button class="push-btn" id="tooltip-state-push">Drive LOW</button>
+                <div class="tooltip-control ${canEdit ? '' : 'disabled'}">
+                    <button class="push-btn" id="tooltip-state-push" ${btnDisabled}>Drive LOW</button>
                     <div class="control-text">
                         <span class="control-label">Pull-Up Push Button</span>
-                        <span class="control-sub">Hold to drive LOW (0V)</span>
+                        <span class="control-sub">Hold to drive LOW</span>
                     </div>
                 </div>
             `;
@@ -351,6 +398,16 @@ function refreshTooltipContent(pin, anchorEl) {
                 </div>
             `;
         }
+    } else {
+        modeSelector = `<span class="info-val badge mode-none">Power / GND</span>`;
+        controlSection = `
+            <div class="tooltip-control disabled">
+                <div class="control-text">
+                    <span class="control-label">Non-configurable Pin</span>
+                    <span class="control-sub">This is a hardwired physical connection.</span>
+                </div>
+            </div>
+        `;
     }
     
     tooltip.innerHTML = `
@@ -368,8 +425,12 @@ function refreshTooltipContent(pin, anchorEl) {
                 <span class="info-val font-mon">${logicalStr}</span>
             </div>
             <div class="tooltip-info-row">
+                <span class="info-label">Ownership:</span>
+                <span class="info-val badge ${ownershipClass}" title="${state.ownerId || ''}">${ownershipStr}</span>
+            </div>
+            <div class="tooltip-info-row">
                 <span class="info-label">Current Mode:</span>
-                <span class="info-val badge mode-${state.mode ? state.mode.toLowerCase() : 'none'}">${state.mode || 'None'}</span>
+                ${modeSelector}
             </div>
             <div class="tooltip-info-row">
                 <span class="info-label">Logic Level:</span>
@@ -386,8 +447,32 @@ function refreshTooltipContent(pin, anchorEl) {
     if (closeX) closeX.onclick = closeTooltip;
     
     if (pin.logical !== null) {
+        const modeSelect = tooltip.querySelector('#tooltip-mode-selector');
+        if (modeSelect) {
+            modeSelect.onchange = (e) => {
+                const newMode = e.target.value;
+                log(`UI requested mode change for Pin ${pin.physical} to: ${newMode}`);
+                
+                if (newMode === "None") {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ action: "close", pin: pin.physical }));
+                    }
+                } else {
+                    if (state.ownerId === myClientId) {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ action: "mode", pin: pin.physical, mode: newMode }));
+                        }
+                    } else {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ action: "open", pin: pin.physical, mode: newMode }));
+                        }
+                    }
+                }
+            };
+        }
+        
         const toggle = tooltip.querySelector('#tooltip-state-toggle');
-        if (toggle) {
+        if (toggle && canEdit) {
             toggle.onchange = (e) => {
                 const newState = e.target.checked ? "High" : "Low";
                 pinsStateMap[pin.physical].value = newState;
@@ -398,7 +483,7 @@ function refreshTooltipContent(pin, anchorEl) {
         }
         
         const pushBtn = tooltip.querySelector('#tooltip-state-push');
-        if (pushBtn) {
+        if (pushBtn && canEdit) {
             const modeLower = state.mode ? state.mode.toLowerCase() : "";
             const defaultState = modeLower === "inputpullup" ? "High" : "Low";
             const pressedState = modeLower === "inputpullup" ? "Low" : "High";
@@ -447,7 +532,11 @@ function setupWebSocket() {
         try {
             const msg = JSON.parse(event.data);
             
-            if (msg.action === "reset") {
+            if (msg.action === "connected") {
+                myClientId = msg.clientId;
+                log(`My simulator UI client ID registered: ${myClientId}`);
+            }
+            else if (msg.action === "reset") {
                 for (const key in pinsStateMap) {
                     delete pinsStateMap[key];
                 }
@@ -481,10 +570,12 @@ function setupWebSocket() {
             else if (msg.action === "state_change") {
                 pinsStateMap[msg.pin] = {
                     mode: msg.mode,
-                    value: msg.value
+                    value: msg.value,
+                    ownerId: msg.ownerId || null,
+                    ownerType: msg.ownerType || ""
                 };
                 updatePinVisuals(msg.pin);
-                log(`Pin ${msg.pin} updated from host: Mode=${msg.mode}, State=${msg.value}`);
+                log(`Pin ${msg.pin} updated: Mode=${msg.mode}, State=${msg.value}, OwnerType=${msg.ownerType}`);
             }
         } catch (err) {
             console.error("Error parsing WebSocket packet", err);
