@@ -1,5 +1,11 @@
 # Gpio Simulator (System.Device.Gpio Shim)
 
+[![NuGet Version](https://img.shields.io/nuget/v/DevDecoder.GpioSimulator.svg?style=flat-square)](https://www.nuget.org/packages/DevDecoder.GpioSimulator)
+[![NuGet Pre Release](https://img.shields.io/nuget/vpre/DevDecoder.GpioSimulator.svg?style=flat-square&label=nuget-beta&color=orange)](https://www.nuget.org/packages/DevDecoder.GpioSimulator)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![.NET Standard 2.0](https://img.shields.io/badge/.NET%20Standard-2.0-purple.svg?style=flat-square)](https://dotnet.microsoft.com/en-us/)
+[![.NET 8.0](https://img.shields.io/badge/.NET-8.0-blueviolet.svg?style=flat-square)](https://dotnet.microsoft.com/en-us/)
+
 An extensible, drop-in C# NuGet replacement library for `System.Device.Gpio` that mimics the hardware namespace, but spins up a beautiful browser-based microcontroller visual simulator rather than requiring physical hardware. Designed for teaching, desktop prototyping, and locked-down learning environments.
 
 ![GPIO Simulator Workspace](docs/screenshot.png)
@@ -15,22 +21,6 @@ An extensible, drop-in C# NuGet replacement library for `System.Device.Gpio` tha
 * **Multi-Board Extensibility**: Supports simulating multiple different boards (e.g. Raspberry Pi 5, Raspberry Pi 4, Arduino Uno) using metadata-driven JSON Board Schemas.
 * **Zero Admin / Firewall Prompts**: Binds strictly to `127.0.0.1` (loopback) to prevent Windows Defender and firewall dialogs on restricted school PCs.
 * **Auto-Spawning**: Automatically launches the local web server on the first `GpioController` instantiation and opens your system's default browser automatically.
-
----
-
-## Directory Structure
-
-```
-GpioSimulator/
-├── GpioSimulator.sln                # Visual Studio 2022 Solution
-├── docs/
-│   └── superpowers/
-│       └── specs/
-│           └── 2026-05-17-gpio-simulator-design.md   # Extensible Design Spec
-└── src/
-    ├── System.Device.Gpio/          # The Shim Library (.NET Standard 2.0)
-    └── DevDecoder.GpioSimulator.Web/ # The Web Simulator UI (.NET 8.0)
-```
 
 ---
 
