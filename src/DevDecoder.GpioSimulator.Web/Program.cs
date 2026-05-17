@@ -116,10 +116,39 @@ void LoadBoardMapping(string boardId)
             activeLogToPhys = tempLogToPhys;
         }
         Log($"Loaded board mapping for: {boardId} ({tempPhysToLog.Count} pins)");
+        
+        // Broadcast dynamic board change layout to active clients
+        _ = BroadcastBoardChange();
     }
     catch (Exception ex)
     {
         Log($"Error loading mapping for {boardId}: {ex.Message}");
+    }
+}
+
+async Task BroadcastBoardChange()
+{
+    string msg;
+    lock (mappingLock)
+    {
+        msg = JsonSerializer.Serialize(new
+        {
+            action = "board_change",
+            boardId = activeBoardId,
+            pins = activePhysToLog
+        });
+    }
+    var bytes = Encoding.UTF8.GetBytes(msg);
+    foreach (var c in clients.Values)
+    {
+        if (c.Socket.State == WebSocketState.Open)
+        {
+            try
+            {
+                await c.Socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+            }
+            catch { }
+        }
     }
 }
 
@@ -226,6 +255,20 @@ app.Use(async (context, next) =>
                 });
                 var connBytes = Encoding.UTF8.GetBytes(connMsg);
                 await webSocket.SendAsync(new ArraySegment<byte>(connBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+
+                // Send initial board mapping info
+                string boardMsg;
+                lock (mappingLock)
+                {
+                    boardMsg = JsonSerializer.Serialize(new
+                    {
+                        action = "board_change",
+                        boardId = activeBoardId,
+                        pins = activePhysToLog
+                    });
+                }
+                var boardBytes = Encoding.UTF8.GetBytes(boardMsg);
+                await webSocket.SendAsync(new ArraySegment<byte>(boardBytes), WebSocketMessageType.Text, true, CancellationToken.None);
 
                 // Send initial states to freshly opened client
                 foreach (var kvp in pinStates)
@@ -405,28 +448,6 @@ app.Use(async (context, next) =>
                             // Check if pin is already open
                             if (pinStates.TryGetValue(physPin, out var existingState))
                             {
-                                // If already open by same client, succeed immediately
-                                if (existingState.OwnerId == clientId)
-                                {
-                                    existingState.Mode = mode;
-                                    var defaultVal = mode == "InputPullUp" ? "High" : "Low";
-                                    existingState.Value = defaultVal;
-                                    
-                                    if (requestId != null)
-                                    {
-                                        var resp = JsonSerializer.Serialize(new {
-                                            action = "open_response",
-                                            requestId = requestId,
-                                            status = "success"
-                                        });
-                                        await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
-                                    }
-                                    
-                                    await BroadcastPinState(physPin, existingState);
-                                    Log($"Physical Pin {physPin} reconfigured to {mode} by its owner {clientId} ({clientType})");
-                                    continue;
-                                }
-                                
                                 // Check if owner is active
                                 bool ownerActive = existingState.OwnerId.HasValue && clients.ContainsKey(existingState.OwnerId.Value);
                                 if (ownerActive)
@@ -438,11 +459,11 @@ app.Use(async (context, next) =>
                                             requestId = requestId,
                                             status = "error",
                                             errorType = "InvalidOperationException",
-                                            errorMessage = $"Pin {physPin} is already opened by another controller ({existingState.OwnerType})."
+                                            errorMessage = $"Pin {physPin} is already open."
                                         });
                                         await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
                                     }
-                                    Log($"Rejecting open for pin {physPin}: Owned by active client {existingState.OwnerId} ({existingState.OwnerType})");
+                                    Log($"Rejecting open for pin {physPin}: Pin is already open (owner: {existingState.OwnerId})");
                                     continue;
                                 }
                             }
@@ -477,13 +498,19 @@ app.Use(async (context, next) =>
                             
                             if (pinStates.TryGetValue(physPin, out var state))
                             {
-                                if (state.OwnerId != clientId)
+                                bool isInputMode = state.Mode.Equals("Input", StringComparison.OrdinalIgnoreCase) ||
+                                                   state.Mode.Equals("InputPullUp", StringComparison.OrdinalIgnoreCase) ||
+                                                   state.Mode.Equals("InputPullDown", StringComparison.OrdinalIgnoreCase);
+
+                                bool isAuthorized = (state.OwnerId == clientId) || (clientType == "ui" && isInputMode);
+
+                                if (!isAuthorized)
                                 {
-                                    Log($"Unauthorized write/read for pin {physPin} by client {clientId} ({clientType}). Owned by {state.OwnerId} ({state.OwnerType})");
+                                    Log($"Unauthorized write/read for pin {physPin} by client {clientId} ({clientType}). Owned by {state.OwnerId} ({state.OwnerType}) in mode {state.Mode}");
                                     continue;
                                 }
                                 state.Value = val;
-                                Log($"Physical Pin {physPin} state set to: {val} by owner {clientId}");
+                                Log($"Physical Pin {physPin} state set to: {val} by {clientType} {clientId}");
                                 await BroadcastPinState(physPin, state);
                             }
                             else

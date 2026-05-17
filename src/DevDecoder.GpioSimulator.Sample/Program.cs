@@ -28,7 +28,7 @@ namespace DevDecoder.GpioSimulator.Sample
                 Console.WriteLine("Booting simulator...");
             }
 
-            PinNumberingScheme defaultScheme = PinNumberingScheme.Logical;
+            PinNumberingScheme defaultScheme = PinNumberingScheme.Board;
 
             // Parse args
             for (int i = 0; i < args.Length; i++)
@@ -286,6 +286,105 @@ namespace DevDecoder.GpioSimulator.Sample
                                 PinValue readVal = controller.Read(readPin);
                                 Console.WriteLine($"Pin {readPin} value is: {readVal}");
                                 break;
+                            case "setmode":
+                            case "sm":
+                            case "set":
+                                if (parts.Length < 3)
+                                {
+                                    Console.WriteLine("Error: Please specify pin and mode. Syntax: setmode <pin> <in|out|pullup|pulldown>");
+                                    break;
+                                }
+                                if (int.TryParse(parts[1], out int smPin))
+                                {
+                                    bool isOpen = false;
+                                    lock (_pins)
+                                    {
+                                        isOpen = _pins.ContainsKey(smPin);
+                                    }
+                                    if (!isOpen)
+                                    {
+                                        Console.WriteLine($"Error: Pin {smPin} is not open.");
+                                        break;
+                                    }
+                                    string modeStr = parts[2].ToLower();
+                                    PinMode mode;
+                                    if (modeStr == "out" || modeStr == "output")
+                                    {
+                                        mode = PinMode.Output;
+                                    }
+                                    else if (modeStr == "pullup" || modeStr == "inputpullup" || modeStr == "pu")
+                                    {
+                                        mode = PinMode.InputPullUp;
+                                    }
+                                    else if (modeStr == "pulldown" || modeStr == "inputpulldown" || modeStr == "pd")
+                                    {
+                                        mode = PinMode.InputPullDown;
+                                    }
+                                    else
+                                    {
+                                        mode = PinMode.Input;
+                                    }
+                                    controller.SetPinMode(smPin, mode);
+                                    lock (_pins)
+                                    {
+                                        _pins[smPin] = mode;
+                                    }
+                                    lock (_lastValues)
+                                    {
+                                        _lastValues[smPin] = controller.Read(smPin);
+                                    }
+                                    Console.WriteLine($"Successfully set Pin {smPin} mode to {mode}.");
+                                }
+                                else
+                                {
+                                    Console.WriteLine("Error: Invalid pin number.");
+                                }
+                                break;
+                            case "isopen":
+                            case "io":
+                                if (parts.Length < 2 || !int.TryParse(parts[1], out int ioPin))
+                                {
+                                    Console.WriteLine("Error: Please specify pin number. Syntax: isopen <pin>");
+                                    break;
+                                }
+                                bool isPinOpen = controller.IsPinOpen(ioPin);
+                                Console.WriteLine($"Pin {ioPin} open status: {isPinOpen}");
+                                break;
+                            case "issupported":
+                            case "is":
+                                if (parts.Length < 3)
+                                {
+                                    Console.WriteLine("Error: Please specify pin and mode. Syntax: issupported <pin> <in|out|pullup|pulldown>");
+                                    break;
+                                }
+                                if (int.TryParse(parts[1], out int suppPin))
+                                {
+                                    string modeStr = parts[2].ToLower();
+                                    PinMode mode;
+                                    if (modeStr == "out" || modeStr == "output")
+                                    {
+                                        mode = PinMode.Output;
+                                    }
+                                    else if (modeStr == "pullup" || modeStr == "inputpullup" || modeStr == "pu")
+                                    {
+                                        mode = PinMode.InputPullUp;
+                                    }
+                                    else if (modeStr == "pulldown" || modeStr == "inputpulldown" || modeStr == "pd")
+                                    {
+                                        mode = PinMode.InputPullDown;
+                                    }
+                                    else
+                                    {
+                                        mode = PinMode.Input;
+                                    }
+                                    bool supported = controller.IsPinModeSupported(suppPin, mode);
+                                    Console.WriteLine($"Pin {suppPin} mode {mode} supported: {supported}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine("Error: Invalid pin number.");
+                                }
+                                break;
                             default:
                                 Console.ForegroundColor = ConsoleColor.Yellow;
                                 Console.WriteLine($"Unknown command: '{cmd}'. Type 'help' for support.");
@@ -345,6 +444,9 @@ namespace DevDecoder.GpioSimulator.Sample
             Console.WriteLine("  close <pin>                          - Close an open pin");
             Console.WriteLine("  write <pin> <1|0|h|l>                - Write High/Low to an output pin (e.g. write 3 1)");
             Console.WriteLine("  read <pin>                           - Read the current value of an open pin");
+            Console.WriteLine("  setmode <pin> <mode>                 - Change the mode of an open pin");
+            Console.WriteLine("  isopen <pin>                         - Check if a pin is currently open");
+            Console.WriteLine("  issupported <pin> <mode>             - Check if a pin mode is supported");
             Console.WriteLine("  scheme <logical|board>               - Switch dynamic pin numbering scheme (e.g. scheme board)");
             Console.WriteLine("  schema <logical|board>               - Alias for scheme command");
             Console.WriteLine("  status                               - Display status of all currently opened pins");

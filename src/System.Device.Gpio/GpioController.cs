@@ -17,6 +17,11 @@ namespace System.Device.Gpio
         private readonly ConcurrentDictionary<int, ConcurrentBag<(PinEventTypes Types, PinChangeEventHandler Handler)>> _pinCallbacks = 
             new ConcurrentDictionary<int, ConcurrentBag<(PinEventTypes Types, PinChangeEventHandler Handler)>>();
         
+        private readonly ConcurrentDictionary<int, int> _activePhysToLog = new ConcurrentDictionary<int, int>();
+        private readonly ConcurrentDictionary<int, int> _activeLogToPhys = new ConcurrentDictionary<int, int>();
+        private readonly object _mappingLock = new object();
+        private readonly ManualResetEventSlim _initialMappingReceived = new ManualResetEventSlim(false);
+        
         private class OpenPinResult
         {
             public bool Success { get; set; }
@@ -89,17 +94,16 @@ namespace System.Device.Gpio
 
         public bool IsValidPin(int pinNumber)
         {
-            if (NumberingScheme == PinNumberingScheme.Logical)
+            lock (_mappingLock)
             {
-                return pinNumber >= 0 && pinNumber <= 27;
-            }
-            else
-            {
-                var validPhysPins = new System.Collections.Generic.HashSet<int> 
-                { 
-                    3, 5, 7, 8, 10, 11, 12, 13, 15, 16, 18, 19, 21, 22, 23, 24, 26, 27, 28, 29, 31, 32, 33, 35, 36, 37, 38, 40 
-                };
-                return validPhysPins.Contains(pinNumber);
+                if (NumberingScheme == PinNumberingScheme.Logical)
+                {
+                    return _activeLogToPhys.ContainsKey(pinNumber);
+                }
+                else
+                {
+                    return _activePhysToLog.ContainsKey(pinNumber);
+                }
             }
         }
 
@@ -176,6 +180,12 @@ namespace System.Device.Gpio
                 
                 // Start background listener
                 _ = Task.Run(ReceiveWebSocketMessages);
+
+                // Wait up to 5 seconds for the initial board mapping to be received and processed
+                if (!_initialMappingReceived.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    throw new InvalidOperationException("Failed to receive initial board mapping from simulator server within the timeout period.");
+                }
             }
             catch (Exception ex)
             {
@@ -266,6 +276,50 @@ namespace System.Device.Gpio
                         {
                             _openPins.TryRemove(pin, out _);
                             _pinValues.TryRemove(pin, out _);
+                        }
+                    }
+                    else if (msg.Contains("\"action\":\"board_change\""))
+                    {
+                        int pinsIndex = msg.IndexOf("\"pins\":");
+                        if (pinsIndex != -1)
+                        {
+                            int startIndex = msg.IndexOf('{', pinsIndex);
+                            int endIndex = msg.IndexOf('}', startIndex);
+                            if (startIndex != -1 && endIndex != -1)
+                            {
+                                var pinsContent = msg.Substring(startIndex + 1, endIndex - startIndex - 1);
+                                var pairs = pinsContent.Split(',');
+                                var tempPhysToLog = new System.Collections.Generic.Dictionary<int, int>();
+                                var tempLogToPhys = new System.Collections.Generic.Dictionary<int, int>();
+                                foreach (var pair in pairs)
+                                {
+                                    var parts = pair.Split(':');
+                                    if (parts.Length == 2)
+                                    {
+                                        var physStr = parts[0].Trim('"', ' ', '\r', '\n');
+                                        var logStr = parts[1].Trim('"', ' ', '\r', '\n');
+                                        if (int.TryParse(physStr, out int phys) && int.TryParse(logStr, out int log))
+                                        {
+                                            tempPhysToLog[phys] = log;
+                                            tempLogToPhys[log] = phys;
+                                        }
+                                    }
+                                }
+                                lock (_mappingLock)
+                                {
+                                    _activePhysToLog.Clear();
+                                    _activeLogToPhys.Clear();
+                                    foreach (var kvp in tempPhysToLog)
+                                    {
+                                        _activePhysToLog[kvp.Key] = kvp.Value;
+                                    }
+                                    foreach (var kvp in tempLogToPhys)
+                                    {
+                                        _activeLogToPhys[kvp.Key] = kvp.Value;
+                                    }
+                                }
+                                _initialMappingReceived.Set();
+                            }
                         }
                     }
                 }
@@ -440,7 +494,12 @@ namespace System.Device.Gpio
 
         public virtual bool IsPinModeSupported(int pinNumber, PinMode mode)
         {
-            return true;
+            return IsValidPin(pinNumber) && (
+                mode == PinMode.Input || 
+                mode == PinMode.Output || 
+                mode == PinMode.InputPullUp || 
+                mode == PinMode.InputPullDown
+            );
         }
 
         public virtual void RegisterCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)

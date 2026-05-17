@@ -6,9 +6,11 @@ let ws = null;
 const pinsStateMap = {};
 let activeTooltipPin = null;
 let myClientId = null;
+let holdOriginalValue = null;
+let activeHoldPin = null;
 
 // Track Canvas Simulation States
-let activeTool = 'move';
+let activeTool = 'pointer';
 let panzoomInstance = null;
 const customBoards = [];
 
@@ -98,7 +100,7 @@ function log(message) {
     logTerminal.scrollTop = logTerminal.scrollHeight;
 }
 
-async function loadBoard(boardId) {
+async function loadBoard(boardId, skipPostNotification = false) {
     closeTooltip();
     log(`Loading board component for: ${boardId}...`);
     try {
@@ -115,8 +117,8 @@ async function loadBoard(boardId) {
         
         renderBoard();
         
-        // Notify the server of the active board layout if standard board
-        if (!customBoard) {
+        // Notify the server of the active board layout if standard board and not skipped
+        if (!customBoard && !skipPostNotification) {
             await fetch(`/api/board/active?boardId=${boardId}`, { method: 'POST' });
         }
         
@@ -184,14 +186,110 @@ function renderBoard() {
         indexSpan.textContent = pin.physical;
         hotspot.appendChild(indexSpan);
 
-        hotspot.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (activeTool === 'pointer' || activeTool === 'move') {
-                showTooltip(pin, hotspot);
-            } else if (activeTool === 'delete') {
-                log(`Interacted with Pin ${pin.physical} with Delete Tool.`);
+        let holdTimeout = null;
+        let isHolding = false;
+        let startX = 0;
+        let startY = 0;
+        let hasDragged = false;
+
+        const onMove = (e) => {
+            const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+            const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
+            const dist = Math.hypot(clientX - startX, clientY - startY);
+            if (dist > 5) {
+                hasDragged = true;
+                if (holdTimeout) {
+                    clearTimeout(holdTimeout);
+                    holdTimeout = null;
+                }
+                if (isHolding) {
+                    isHolding = false;
+                    endHoldAction(pin);
+                }
             }
-        });
+        };
+
+        const onDown = (e) => {
+            if (e.type === 'mousedown' && e.button !== 0) return;
+            isHolding = false;
+            hasDragged = false;
+            
+            const clientX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+            const clientY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
+            startX = clientX;
+            startY = clientY;
+            
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('touchmove', onMove, { passive: true });
+            
+            if (activeTool === 'pointer') {
+                const state = pinsStateMap[pin.physical];
+                const isInput = state && state.mode && (
+                    state.mode.toLowerCase() === "input" || 
+                    state.mode.toLowerCase() === "inputpullup" || 
+                    state.mode.toLowerCase() === "inputpulldown"
+                );
+                
+                if (isInput) {
+                    holdTimeout = setTimeout(() => {
+                        isHolding = true;
+                        startHoldAction(pin);
+                    }, 250);
+                }
+            }
+        };
+        
+        const removeMoveListeners = () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('touchmove', onMove);
+        };
+
+        const onUp = (e) => {
+            removeMoveListeners();
+
+            if (holdTimeout) {
+                clearTimeout(holdTimeout);
+                holdTimeout = null;
+            }
+            
+            if (hasDragged) {
+                return;
+            }
+            
+            if (isHolding) {
+                isHolding = false;
+                endHoldAction(pin);
+                return;
+            }
+            
+            if (e.type === 'mouseup' || e.type === 'touchend') {
+                if (activeTool === 'pointer') {
+                    showTooltip(pin, hotspot);
+                } else if (activeTool === 'delete') {
+                    log(`Interacted with Pin ${pin.physical} with Delete Tool.`);
+                }
+            }
+        };
+        
+        const onCancel = (e) => {
+            removeMoveListeners();
+
+            if (holdTimeout) {
+                clearTimeout(holdTimeout);
+                holdTimeout = null;
+            }
+            if (isHolding) {
+                isHolding = false;
+                endHoldAction(pin);
+            }
+        };
+        
+        hotspot.addEventListener('mousedown', onDown);
+        hotspot.addEventListener('touchstart', onDown, { passive: true });
+        hotspot.addEventListener('mouseup', onUp);
+        hotspot.addEventListener('touchend', onUp);
+        hotspot.addEventListener('mouseleave', onCancel);
+        hotspot.addEventListener('touchcancel', onCancel);
 
         boardVisual.appendChild(hotspot);
         updatePinVisuals(pin.physical);
@@ -215,10 +313,10 @@ function initPanZoom() {
         maxZoom: 4.0,
         minZoom: 0.05,
         zoomSpeed: 0.065,
-        // Allow panning only when: middle-click (any tool) OR left-click + Move tool
+        // Allow panning only when: middle-click (any tool) OR left-click + Pointer tool
         beforeMouseDown(e) {
             if (e.button === 1) return false;            // middle-click always pans
-            if (e.button === 0 && activeTool === 'move') return false; // left + move tool
+            if (e.button === 0 && activeTool === 'pointer') return false; // left + pointer tool
             return true;                                  // block panning otherwise
         }
     });
@@ -308,27 +406,46 @@ function refreshTooltipContent(pin, anchorEl) {
     
     let ownershipStr = "Unopened";
     let ownershipClass = "badge-unopened";
-    let canEdit = false;
+    
+    const isInputMode = state.mode && (
+        state.mode.toLowerCase() === "input" || 
+        state.mode.toLowerCase() === "inputpullup" || 
+        state.mode.toLowerCase() === "inputpulldown"
+    );
     
     const isOpened = state.mode && state.mode !== "None" && state.ownerId;
+    let canEditMode = false;
+    let canEditValue = false;
+    
     if (!isOpened) {
         ownershipStr = "Unopened (Available)";
         ownershipClass = "badge-available";
-        canEdit = true;
+        canEditMode = true;
+        canEditValue = true;
     } else if (state.ownerId === myClientId) {
         ownershipStr = "Opened by You";
         ownershipClass = "badge-owned-by-me";
-        canEdit = true;
+        canEditMode = true;
+        canEditValue = true;
     } else {
         ownershipStr = `${state.ownerType || "Controller"} (${state.ownerId ? state.ownerId.substring(0, 8) : "unknown"})`;
         ownershipClass = "badge-owned-by-other";
-        canEdit = false;
+        canEditMode = false;
+        canEditValue = isInputMode;
     }
     
     let modeSelector = "";
+    let ownershipRow = "";
     
     if (pin.logical !== null) {
         logicalStr = `GPIO ${pin.logical}`;
+        ownershipRow = `
+            <div class="tooltip-info-row">
+                <span class="info-label">Ownership:</span>
+                <span class="info-val badge ${ownershipClass}" title="${state.ownerId || ''}">${ownershipStr}</span>
+            </div>
+        `;
+        
         const modeLower = state.mode ? state.mode.toLowerCase() : "";
         
         const modes = ["None", "Input", "Output", "InputPullUp", "InputPullDown"];
@@ -344,18 +461,21 @@ function refreshTooltipContent(pin, anchorEl) {
             return `<option value="${m}" ${selected}>${modeLabels[m]}</option>`;
         }).join("");
         
-        const disabledAttr = canEdit ? "" : "disabled";
-        modeSelector = `
-            <select id="tooltip-mode-selector" class="mode-select" ${disabledAttr}>
-                ${options}
-            </select>
-        `;
+        if (!canEditMode) {
+            modeSelector = `<span class="info-val font-mon">${state.mode || "None"}</span>`;
+        } else {
+            modeSelector = `
+                <select id="tooltip-mode-selector" class="mode-select">
+                    ${options}
+                </select>
+            `;
+        }
         
         if (modeLower === "input") {
             const checkedAttr = state.value === "High" ? "checked" : "";
-            const toggleDisabled = canEdit ? "" : "disabled";
+            const toggleDisabled = canEditValue ? "" : "disabled";
             controlSection = `
-                <div class="tooltip-control ${canEdit ? '' : 'disabled'}">
+                <div class="tooltip-control ${canEditValue ? '' : 'disabled'}">
                     <label class="switch">
                         <input type="checkbox" id="tooltip-state-toggle" ${checkedAttr} ${toggleDisabled}>
                         <span class="slider round"></span>
@@ -367,9 +487,9 @@ function refreshTooltipContent(pin, anchorEl) {
                 </div>
             `;
         } else if (modeLower === "inputpulldown") {
-            const btnDisabled = canEdit ? "" : "disabled";
+            const btnDisabled = canEditValue ? "" : "disabled";
             controlSection = `
-                <div class="tooltip-control ${canEdit ? '' : 'disabled'}">
+                <div class="tooltip-control ${canEditValue ? '' : 'disabled'}">
                     <button class="push-btn" id="tooltip-state-push" ${btnDisabled}>Drive HIGH</button>
                     <div class="control-text">
                         <span class="control-label">Pull-Down Push Button</span>
@@ -378,9 +498,9 @@ function refreshTooltipContent(pin, anchorEl) {
                 </div>
             `;
         } else if (modeLower === "inputpullup") {
-            const btnDisabled = canEdit ? "" : "disabled";
+            const btnDisabled = canEditValue ? "" : "disabled";
             controlSection = `
-                <div class="tooltip-control ${canEdit ? '' : 'disabled'}">
+                <div class="tooltip-control ${canEditValue ? '' : 'disabled'}">
                     <button class="push-btn" id="tooltip-state-push" ${btnDisabled}>Drive LOW</button>
                     <div class="control-text">
                         <span class="control-label">Pull-Up Push Button</span>
@@ -424,10 +544,7 @@ function refreshTooltipContent(pin, anchorEl) {
                 <span class="info-label">Logical ID:</span>
                 <span class="info-val font-mon">${logicalStr}</span>
             </div>
-            <div class="tooltip-info-row">
-                <span class="info-label">Ownership:</span>
-                <span class="info-val badge ${ownershipClass}" title="${state.ownerId || ''}">${ownershipStr}</span>
-            </div>
+            ${ownershipRow}
             <div class="tooltip-info-row">
                 <span class="info-label">Current Mode:</span>
                 ${modeSelector}
@@ -472,7 +589,7 @@ function refreshTooltipContent(pin, anchorEl) {
         }
         
         const toggle = tooltip.querySelector('#tooltip-state-toggle');
-        if (toggle && canEdit) {
+        if (toggle && canEditValue) {
             toggle.onchange = (e) => {
                 const newState = e.target.checked ? "High" : "Low";
                 pinsStateMap[pin.physical].value = newState;
@@ -483,7 +600,7 @@ function refreshTooltipContent(pin, anchorEl) {
         }
         
         const pushBtn = tooltip.querySelector('#tooltip-state-push');
-        if (pushBtn && canEdit) {
+        if (pushBtn && canEditValue) {
             const modeLower = state.mode ? state.mode.toLowerCase() : "";
             const defaultState = modeLower === "inputpullup" ? "High" : "Low";
             const pressedState = modeLower === "inputpullup" ? "Low" : "High";
@@ -514,6 +631,72 @@ function refreshTooltipContent(pin, anchorEl) {
     }
 }
 
+function startHoldAction(pin) {
+    const state = pinsStateMap[pin.physical];
+    if (!state || !state.mode || state.mode === "None") return;
+    
+    const isInputMode = state.mode && (
+        state.mode.toLowerCase() === "input" || 
+        state.mode.toLowerCase() === "inputpullup" || 
+        state.mode.toLowerCase() === "inputpulldown"
+    );
+    
+    const canEdit = !state.ownerId || state.ownerId === myClientId || isInputMode;
+    if (!canEdit) return;
+    
+    const modeLower = state.mode.toLowerCase();
+    if (modeLower !== "input" && modeLower !== "inputpullup" && modeLower !== "inputpulldown") return;
+    
+    activeHoldPin = pin;
+    holdOriginalValue = state.value || "Low";
+    
+    let pressedState = "High";
+    if (modeLower === "inputpullup") {
+        pressedState = "Low";
+    } else if (modeLower === "inputpulldown") {
+        pressedState = "High";
+    } else if (modeLower === "input") {
+        pressedState = holdOriginalValue === "High" ? "Low" : "High";
+    }
+    
+    state.value = pressedState;
+    log(`Hotspot hold started: Pin ${pin.physical} driven to ${pressedState}`);
+    sendPinState(pin.physical, "read", pressedState);
+    updatePinVisuals(pin.physical);
+    
+    if (activeTooltipPin && activeTooltipPin.physical === pin.physical) {
+        refreshTooltipContent(pin, document.querySelector(`.pin-hotspot.pin-phys-${pin.physical}`));
+    }
+}
+
+function endHoldAction(pin) {
+    if (activeHoldPin && activeHoldPin.physical === pin.physical) {
+        const state = pinsStateMap[pin.physical];
+        if (state && holdOriginalValue !== null) {
+            const modeLower = state.mode ? state.mode.toLowerCase() : "";
+            let defaultState = holdOriginalValue;
+            if (modeLower === "inputpullup") {
+                defaultState = "High";
+            } else if (modeLower === "inputpulldown") {
+                defaultState = "Low";
+            } else if (modeLower === "input") {
+                defaultState = holdOriginalValue;
+            }
+            
+            state.value = defaultState;
+            log(`Hotspot hold released: Pin ${pin.physical} reverted to default ${defaultState}`);
+            sendPinState(pin.physical, "read", defaultState);
+            updatePinVisuals(pin.physical);
+            
+            if (activeTooltipPin && activeTooltipPin.physical === pin.physical) {
+                refreshTooltipContent(pin, document.querySelector(`.pin-hotspot.pin-phys-${pin.physical}`));
+            }
+        }
+        activeHoldPin = null;
+        holdOriginalValue = null;
+    }
+}
+
 function closeTooltip() {
     tooltip.style.display = 'none';
     activeTooltipPin = null;
@@ -535,6 +718,10 @@ function setupWebSocket() {
             if (msg.action === "connected") {
                 myClientId = msg.clientId;
                 log(`My simulator UI client ID registered: ${myClientId}`);
+            }
+            else if (msg.action === "board_change") {
+                log(`Server active board layout changed to: ${msg.boardId}`);
+                loadBoard(msg.boardId, true);
             }
             else if (msg.action === "reset") {
                 for (const key in pinsStateMap) {
@@ -861,7 +1048,6 @@ filePickerInput.onchange = (e) => {
 const tools = [
     { id: 'pointer', name: 'Pointer' },
     { id: 'connector', name: 'Connector' },
-    { id: 'move', name: 'Move' },
     { id: 'delete', name: 'Delete' }
 ];
 
@@ -880,9 +1066,8 @@ tools.forEach(tool => {
             
             // Alter board cursor style based on tool selection
             if (boardVisual) {
-                if (tool.id === 'pointer') boardVisual.style.cursor = 'default';
+                if (tool.id === 'pointer') boardVisual.style.cursor = 'grab';
                 else if (tool.id === 'connector') boardVisual.style.cursor = 'crosshair';
-                else if (tool.id === 'move') boardVisual.style.cursor = 'grab';
                 else if (tool.id === 'delete') boardVisual.style.cursor = 'alias';
             }
         };

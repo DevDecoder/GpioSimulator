@@ -160,5 +160,46 @@ namespace DevDecoder.GpioSimulator.Tests
                 Assert.Equal(PinValue.High, controller.Read(15));
             }
         }
+
+        [Fact]
+        public void IsPinModeSupported_ReturnsCorrectValues()
+        {
+            using (var controller = new GpioController())
+            {
+                Assert.True(controller.IsPinModeSupported(5, PinMode.Input));
+                Assert.True(controller.IsPinModeSupported(5, PinMode.Output));
+                Assert.True(controller.IsPinModeSupported(5, PinMode.InputPullUp));
+                Assert.True(controller.IsPinModeSupported(5, PinMode.InputPullDown));
+                Assert.False(controller.IsPinModeSupported(-1, PinMode.Input));
+                Assert.False(controller.IsPinModeSupported(99, PinMode.Input));
+            }
+        }
+
+        [Fact]
+        public void OpenPin_AlreadyOpen_ThrowsInvalidOperationException()
+        {
+            using (var controller = new GpioController())
+            {
+                controller.OpenPin(4, PinMode.Input);
+                Assert.True(controller.IsPinOpen(4));
+
+                // Opening again must throw InvalidOperationException
+                Assert.Throws<InvalidOperationException>(() => controller.OpenPin(4, PinMode.Input));
+                Assert.Throws<InvalidOperationException>(() => controller.OpenPin(4, PinMode.Output));
+            }
+        }
+
+        [Fact]
+        public void IsValidPin_InvalidRanges_ReturnsFalse()
+        {
+            using (var controller = new GpioController(PinNumberingScheme.Logical))
+            {
+                Assert.True(controller.IsValidPin(5));
+                Assert.True(controller.IsValidPin(0));
+                Assert.True(controller.IsValidPin(27));
+                Assert.False(controller.IsValidPin(-1));
+                Assert.False(controller.IsValidPin(28));
+            }
+        }
     }
 }
