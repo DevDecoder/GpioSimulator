@@ -29,12 +29,12 @@
   </PropertyGroup>
 
   <Target Name="PublishWebServer" AfterTargets="ResolveProjectReferences" BeforeTargets="GenerateNuspec;GetCopyToOutputDirectoryItems">
-    <MSBuild Projects="../DevDecoder.GpioSimulator.Web/DevDecoder.GpioSimulator.Web.csproj" Targets="Publish" Properties="Configuration=$(Configuration);TargetFramework=net8.0" />
+    <MSBuild Projects="../DevDecoder.GpioSimulator.Web/DevDecoder.GpioSimulator.Web.csproj" Targets="Publish" Properties="Configuration=$(Configuration);TargetFramework=net6.0" />
   </Target>
 
   <Target Name="IncludePublishedWebServerFiles" DependsOnTargets="PublishWebServer">
     <ItemGroup>
-      <TfmSpecificPackageFile Include="../DevDecoder.GpioSimulator.Web/bin/$(Configuration)/net8.0/publish/**/*.*" Exclude="../DevDecoder.GpioSimulator.Web/bin/$(Configuration)/net8.0/publish/**/*.pdb">
+      <TfmSpecificPackageFile Include="../DevDecoder.GpioSimulator.Web/bin/$(Configuration)/net6.0/publish/**/*.*" Exclude="../DevDecoder.GpioSimulator.Web/bin/$(Configuration)/net6.0/publish/**/*.pdb">
         <PackagePath>contentFiles/any/any/simulator/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
         <PackageCopyToOutput>true</PackageCopyToOutput>
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

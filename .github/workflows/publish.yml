@@ -56,7 +56,7 @@ jobs:
           INCLUDE_SYMBOLS: true
           VERSION_STATIC: ${{env.NBGV_Version}}
 
-      - name: Publish Local Driver
+      - name: Publish Drivers
         uses: alirezanet/publish-nuget@v3.1.0
         with:
           PROJECT_FILE_PATH: src/DevDecoder.GpioSimulator.Drivers/DevDecoder.GpioSimulator.Drivers.csproj
