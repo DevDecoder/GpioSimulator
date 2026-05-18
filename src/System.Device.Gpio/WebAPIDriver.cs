@@ -327,7 +327,6 @@ namespace DevDecoder.GpioSimulator
 
         protected override PinValue ReadInternal(int pinNumber)
         {
-            SendPinMessage(pinNumber, "read", "");
             return PinValues.TryGetValue(pinNumber, out var val) ? val : PinValue.Low;
         }
 
