@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/dist/css/goldenlayout-base.css">
     <link id="golden-layout-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/dist/css/themes/goldenlayout-dark-theme.css">
     
-    <link rel="stylesheet" href="style.css?v=6">
+    <link rel="stylesheet" href="style.css?v={{CACHE_BUST_VERSION}}">
 </head>
 <body>
     <!-- Top Menu Bar -->
@@ -136,6 +136,6 @@
     <!-- panzoom UMD — must load before main.js module executes -->
     <script defer src="https://unpkg.com/panzoom@9.4.0/dist/panzoom.min.js"></script>
     <!-- Script registered as ES module for dynamic CDN imports -->
-    <script type="module" src="main.js?v=7"></script>
+    <script type="module" src="main.js?v={{CACHE_BUST_VERSION}}"></script>
 </body>
 </html>

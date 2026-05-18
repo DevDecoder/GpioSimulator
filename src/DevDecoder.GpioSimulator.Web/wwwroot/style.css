@@ -1044,7 +1044,7 @@ input:checked + .slider:before {
     padding: 8px 14px;
     border-radius: 6px;
     cursor: pointer;
-    box-shadow: 0 4px 10px rgba(102, 252, 241, 0.3);
+    box-shadow: 0 4px 10px var(--accent-glow);
     transition: all 0.1s ease;
     user-select: none;
     -webkit-user-select: none;
@@ -1055,7 +1055,7 @@ input:checked + .slider:before {
 
 .push-btn:active {
     transform: scale(0.94);
-    box-shadow: 0 2px 4px rgba(102, 252, 241, 0.1);
+    box-shadow: 0 2px 4px var(--accent-glow);
 }
 
 .badge.mode-inputpullup {
@@ -1117,6 +1117,123 @@ input:checked + .slider:before {
     cursor: not-allowed;
     background: rgba(20, 20, 25, 0.85);
     color: rgba(255, 255, 255, 0.4);
+}
+
+/* Light Theme Tooltip & Interactive Control Overrides */
+body.light-theme .glass-panel {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(0, 168, 255, 0.3);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.12);
+}
+
+body.light-theme .tooltip-header {
+    border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+body.light-theme .tooltip-header h4 {
+    color: var(--text-bright);
+}
+
+body.light-theme .close-btn {
+    color: #666;
+}
+
+body.light-theme .close-btn:hover {
+    color: var(--text-bright);
+}
+
+body.light-theme .info-label,
+body.light-theme .control-sub {
+    color: #5f6775;
+}
+
+body.light-theme .info-val {
+    color: var(--text-bright);
+}
+
+body.light-theme .tooltip-control {
+    border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+body.light-theme .tooltip-control .control-label {
+    color: var(--text-bright);
+}
+
+body.light-theme .mode-select {
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--text-bright);
+    border-color: rgba(0, 0, 0, 0.15);
+}
+
+body.light-theme .mode-select:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+
+body.light-theme .mode-select:focus:not(:disabled) {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+body.light-theme .mode-select:disabled {
+    background: rgba(240, 240, 245, 0.95);
+    color: rgba(0, 0, 0, 0.4);
+}
+
+body.light-theme .slider {
+    background-color: #cbd5e0;
+}
+
+body.light-theme .state-indicator.high {
+    color: #2ecc71; /* Highly readable green on light background */
+}
+
+/* Light Theme Tooltip Badge Specific Colors */
+body.light-theme .badge.badge-available {
+    background-color: rgba(46, 204, 113, 0.1);
+    color: #27ae60;
+    border-color: rgba(46, 204, 113, 0.25);
+}
+
+body.light-theme .badge.badge-owned-by-me {
+    background-color: var(--accent-glow);
+    color: var(--accent-dim);
+    border-color: rgba(0, 168, 255, 0.3);
+}
+
+body.light-theme .badge.badge-owned-by-other {
+    background-color: rgba(231, 76, 60, 0.1);
+    color: #c0392b;
+    border-color: rgba(231, 76, 60, 0.25);
+}
+
+body.light-theme .badge.mode-input {
+    background-color: rgba(52, 152, 219, 0.1);
+    color: #2980b9;
+    border-color: rgba(52, 152, 219, 0.25);
+}
+
+body.light-theme .badge.mode-output {
+    background-color: rgba(155, 89, 182, 0.1);
+    color: #8e44ad;
+    border-color: rgba(155, 89, 182, 0.25);
+}
+
+body.light-theme .badge.mode-none {
+    background-color: rgba(127, 143, 166, 0.1);
+    color: #2f3640;
+    border-color: rgba(127, 143, 166, 0.25);
+}
+
+body.light-theme .badge.mode-inputpullup {
+    background-color: rgba(230, 126, 34, 0.1);
+    color: #d35400;
+    border-color: rgba(230, 126, 34, 0.25);
+}
+
+body.light-theme .badge.mode-inputpulldown {
+    background-color: rgba(26, 188, 156, 0.1);
+    color: #16a085;
+    border-color: rgba(26, 188, 156, 0.25);
 }
 
 

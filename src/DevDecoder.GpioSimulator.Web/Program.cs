@@ -3,8 +3,10 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
@@ -37,6 +39,39 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     ContentRootPath = contentRoot
 });
 var app = builder.Build();
+
+var assemblyVersion = typeof(Program).Assembly
+    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+    .InformationalVersion ?? typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+var bustVersion = Uri.EscapeDataString(assemblyVersion);
+
+app.MapGet("/", async (HttpContext context) =>
+{
+    var htmlPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "index.html");
+    if (!File.Exists(htmlPath))
+    {
+        return Results.NotFound();
+    }
+    
+    var html = await File.ReadAllTextAsync(htmlPath);
+    html = ApplyCacheBusting(html, bustVersion);
+    
+    return Results.Content(html, "text/html", Encoding.UTF8);
+});
+
+app.MapGet("/index.html", async (HttpContext context) =>
+{
+    var htmlPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "index.html");
+    if (!File.Exists(htmlPath))
+    {
+        return Results.NotFound();
+    }
+    
+    var html = await File.ReadAllTextAsync(htmlPath);
+    html = ApplyCacheBusting(html, bustVersion);
+    
+    return Results.Content(html, "text/html", Encoding.UTF8);
+});
 
 app.UseDefaultFiles();
 var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
@@ -476,4 +511,14 @@ public class ClientConnection
     public WebSocket Socket { get; set; } = null!;
     public string Type { get; set; } = "ui";
     public string Scheme { get; set; } = "Board";
+}
+
+public partial class Program
+{
+    private static readonly Regex CacheBustRegex = new Regex(@"\{\{CACHE_BUST_VERSION\}\}", RegexOptions.Compiled);
+
+    private static string ApplyCacheBusting(string html, string version)
+    {
+        return CacheBustRegex.Replace(html, version);
+    }
 }
