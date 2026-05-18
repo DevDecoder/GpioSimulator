@@ -13,7 +13,6 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
-    <PackageReference Include="System.Device.Gpio" Version="3.2.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,11 +20,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\DevDecoder.GpioSimulator.Tests\**\*.cs" Exclude="..\DevDecoder.GpioSimulator.Tests\obj\**;..\DevDecoder.GpioSimulator.Tests\bin\**" Link="%(RecursiveDir)%(Filename)%(Extension)" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\DevDecoder.GpioSimulator.Drivers\DevDecoder.GpioSimulator.Drivers.csproj" />
+    <ProjectReference Include="..\..\System.Device.Gpio\System.Device.Gpio.csproj" />
+    <ProjectReference Include="..\..\DevDecoder.GpioSimulator.Common\DevDecoder.GpioSimulator.Common.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -20,7 +20,10 @@ An extensible, drop-in C# NuGet replacement library for `System.Device.Gpio` tha
 
 ## 📦 The Packages & Target Scenarios
 
-The simulator is modularly split into **three NuGet packages** depending on your usage scenario:
+The simulator is modularly split into **three NuGet packages** depending on your usage scenario.
+
+> [!IMPORTANT]
+> In most target scenarios, you should **only install either** `DevDecoder.GpioSimulator` (Scenario A) **OR** `DevDecoder.GpioSimulator.Drivers` (Scenario B). You **do not** need to explicitly install `DevDecoder.GpioSimulator.Common` as it is automatically pulled in as a dependency by the other packages.
 
 ### 1. `DevDecoder.GpioSimulator` (Drop-in Web & Visual Shim)
 * **What it is:** The complete drop-in replacement library that replaces the standard `System.Device.Gpio` namespace.
@@ -42,7 +45,7 @@ The simulator is modularly split into **three NuGet packages** depending on your
 
 ### 3. `DevDecoder.GpioSimulator.Common` (Shared State Simulation Engine)
 * **What it is:** The pure class library containing the thread-safe state containers, logical-to-physical conversions, and owner tracking.
-* **When to use:** Used under the hood by both of the packages above. You can also use it to implement your own custom GPIO driver/mock entirely decoupled from presentation or transportation details.
+* **When to use:** Used under the hood by both of the packages above. You **do not need to install this package directly**, as it is transitively included by both the shim and drivers packages. You only need to explicitly install this if you are building your own completely independent custom GPIO drivers or presentation layers decoupled from our visual simulator.
 * **Installation:**
   ```bash
   dotnet add package DevDecoder.GpioSimulator.Common --version 0.5.0-beta
