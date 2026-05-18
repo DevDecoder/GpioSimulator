@@ -82,29 +82,49 @@ namespace DevDecoder.GpioSimulator
             }
         }
 
+        private void ThrowException(string? errorType, string? errorMessage)
+        {
+            if (errorType == "ArgumentException") throw new ArgumentException(errorMessage);
+            if (errorType == "InvalidOperationException") throw new InvalidOperationException(errorMessage);
+            if (errorType == "UnauthorizedAccessException") throw new UnauthorizedAccessException(errorMessage);
+            throw new Exception(errorMessage);
+        }
+
         protected override void ClosePinInternal(int pinNumber)
         {
             int physicalPin = ConvertPin(pinNumber);
-            _engine.ClosePin(physicalPin);
+            if (!_engine.TryClosePin(physicalPin, _clientId, false, out var errorType, out var errorMessage))
+            {
+                ThrowException(errorType, errorMessage);
+            }
         }
 
         protected override void WriteInternal(int pinNumber, PinValue value)
         {
             int physicalPin = ConvertPin(pinNumber);
-            _engine.WritePin(physicalPin, value.ToString(), _clientId, "controller");
+            if (!_engine.TryWritePin(physicalPin, value.ToString(), _clientId, false, out var errorType, out var errorMessage))
+            {
+                ThrowException(errorType, errorMessage);
+            }
         }
 
         protected override PinValue ReadInternal(int pinNumber)
         {
             int physicalPin = ConvertPin(pinNumber);
-            var valStr = _engine.ReadPin(physicalPin);
+            if (!_engine.TryReadPin(physicalPin, _clientId, false, out var valStr, out var errorType, out var errorMessage))
+            {
+                ThrowException(errorType, errorMessage);
+            }
             return valStr == "High" ? PinValue.High : PinValue.Low;
         }
 
         protected override void SetPinModeInternal(int pinNumber, PinMode mode)
         {
             int physicalPin = ConvertPin(pinNumber);
-            _engine.SetPinMode(physicalPin, mode.ToString());
+            if (!_engine.TrySetPinMode(physicalPin, mode.ToString(), _clientId, false, out var errorType, out var errorMessage))
+            {
+                ThrowException(errorType, errorMessage);
+            }
         }
 
         protected override PinMode GetPinModeInternal(int pinNumber)
@@ -117,7 +137,10 @@ namespace DevDecoder.GpioSimulator
         {
             int physicalPin = ConvertPin(pinNumber);
             // Simulate physical button/external stimulus
-            _engine.WritePin(physicalPin, value.ToString(), "test_harness", "ui");
+            if (!_engine.TryWritePin(physicalPin, value.ToString(), "test_harness", true, out var errorType, out var errorMessage))
+            {
+                ThrowException(errorType, errorMessage);
+            }
         }
 
         public GpioSimulatorEngine Engine => _engine;
@@ -140,7 +163,7 @@ namespace DevDecoder.GpioSimulator
                 {
                     if (kvp.Value.OwnerId == _clientId)
                     {
-                        _engine.ClosePin(kvp.Key);
+                        _engine.TryClosePin(kvp.Key, _clientId, false, out _, out _);
                     }
                 }
             }

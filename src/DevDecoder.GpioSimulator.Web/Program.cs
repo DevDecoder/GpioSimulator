@@ -55,6 +55,7 @@ app.MapGet("/", async (HttpContext context) =>
     
     var html = await File.ReadAllTextAsync(htmlPath);
     html = ApplyCacheBusting(html, bustVersion);
+    html = ApplyAuthGuid(html);
     
     return Results.Content(html, "text/html", Encoding.UTF8);
 });
@@ -69,8 +70,23 @@ app.MapGet("/index.html", async (HttpContext context) =>
     
     var html = await File.ReadAllTextAsync(htmlPath);
     html = ApplyCacheBusting(html, bustVersion);
+    html = ApplyAuthGuid(html);
     
     return Results.Content(html, "text/html", Encoding.UTF8);
+});
+
+app.MapGet("/main.js", async (HttpContext context) =>
+{
+    var jsPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "main.js");
+    if (!File.Exists(jsPath))
+    {
+        return Results.NotFound();
+    }
+    
+    var js = await File.ReadAllTextAsync(jsPath);
+    js = ApplyAuthGuid(js);
+    
+    return Results.Content(js, "application/javascript", Encoding.UTF8);
 });
 
 app.UseDefaultFiles();
@@ -252,13 +268,27 @@ app.Use(async (context, next) =>
 
             Log($"Client connected: {clientId} (Type: {clientType}, Scheme: {clientScheme})");
 
-            using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+            var isAuthorizedAdmin = false;
+            string? subProtocol = null;
+            var expectedToken = "simulator-admin-token-" + AuthGuid;
+            
+            if (context.WebSockets.WebSocketRequestedProtocols.Contains(expectedToken))
+            {
+                isAuthorizedAdmin = true;
+                subProtocol = expectedToken;
+            }
+
+            using var webSocket = subProtocol == null 
+                ? await context.WebSockets.AcceptWebSocketAsync() 
+                : await context.WebSockets.AcceptWebSocketAsync(subProtocol);
+
             var connection = new ClientConnection
             {
                 ClientId = clientId,
                 Socket = webSocket,
                 Type = clientType,
-                Scheme = clientScheme
+                Scheme = clientScheme,
+                IsAuthorizedAdmin = isAuthorizedAdmin
             };
             clients.TryAdd(clientId, connection);
 
@@ -455,19 +485,71 @@ app.Use(async (context, next) =>
                                 await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
                             }
                         }
-                        else if (action == "write" || action == "read")
+                        if (action == "write")
                         {
-                            var val = root.GetProperty("value").GetString() ?? "Low";
-                            engine.WritePin(physPin, val, clientId.ToString(), clientType);
+                            var val = root.TryGetProperty("value", out var vProp) ? (vProp.GetString() ?? "Low") : "Low";
+                            if (!engine.TryWritePin(physPin, val, clientId.ToString(), connection.IsAuthorizedAdmin, out var errType, out var errMsg))
+                            {
+                                if (requestId != null)
+                                {
+                                    var resp = JsonSerializer.Serialize(new { action = "write_response", requestId = requestId, status = "error", errorType = errType, errorMessage = errMsg });
+                                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                                }
+                            }
+                            else if (requestId != null)
+                            {
+                                var resp = JsonSerializer.Serialize(new { action = "write_response", requestId = requestId, status = "success" });
+                                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
+                        }
+                        else if (action == "read")
+                        {
+                            if (requestId != null)
+                            {
+                                if (engine.TryReadPin(physPin, clientId.ToString(), connection.IsAuthorizedAdmin, out var val, out var errType, out var errMsg))
+                                {
+                                    var resp = JsonSerializer.Serialize(new { action = "read_response", requestId = requestId, status = "success", value = val });
+                                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                                }
+                                else
+                                {
+                                    var resp = JsonSerializer.Serialize(new { action = "read_response", requestId = requestId, status = "error", errorType = errType, errorMessage = errMsg });
+                                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                                }
+                            }
                         }
                         else if (action == "mode")
                         {
-                            var mode = root.GetProperty("mode").GetString() ?? "Input";
-                            engine.SetPinMode(physPin, mode);
+                            var mode = root.TryGetProperty("mode", out var mProp) ? (mProp.GetString() ?? "Input") : "Input";
+                            if (!engine.TrySetPinMode(physPin, mode, clientId.ToString(), connection.IsAuthorizedAdmin, out var errType, out var errMsg))
+                            {
+                                if (requestId != null)
+                                {
+                                    var resp = JsonSerializer.Serialize(new { action = "mode_response", requestId = requestId, status = "error", errorType = errType, errorMessage = errMsg });
+                                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                                }
+                            }
+                            else if (requestId != null)
+                            {
+                                var resp = JsonSerializer.Serialize(new { action = "mode_response", requestId = requestId, status = "success" });
+                                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
                         }
                         else if (action == "close")
                         {
-                            engine.ClosePin(physPin);
+                            if (!engine.TryClosePin(physPin, clientId.ToString(), connection.IsAuthorizedAdmin, out var errType, out var errMsg))
+                            {
+                                if (requestId != null)
+                                {
+                                    var resp = JsonSerializer.Serialize(new { action = "close_response", requestId = requestId, status = "error", errorType = errType, errorMessage = errMsg });
+                                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                                }
+                            }
+                            else if (requestId != null)
+                            {
+                                var resp = JsonSerializer.Serialize(new { action = "close_response", requestId = requestId, status = "success" });
+                                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
+                            }
                         }
                     }
                 }
@@ -511,14 +593,22 @@ public class ClientConnection
     public WebSocket Socket { get; set; } = null!;
     public string Type { get; set; } = "ui";
     public string Scheme { get; set; } = "Board";
+    public bool IsAuthorizedAdmin { get; set; }
 }
 
 public partial class Program
 {
     private static readonly Regex CacheBustRegex = new Regex(@"\{\{CACHE_BUST_VERSION\}\}", RegexOptions.Compiled);
+    private static readonly Regex AuthGuidRegex = new Regex(@"\{\{AUTH_GUID\}\}", RegexOptions.Compiled);
+    private static readonly string AuthGuid = Guid.NewGuid().ToString("D");
 
     private static string ApplyCacheBusting(string html, string version)
     {
         return CacheBustRegex.Replace(html, version);
+    }
+
+    private static string ApplyAuthGuid(string html)
+    {
+        return AuthGuidRegex.Replace(html, AuthGuid);
     }
 }

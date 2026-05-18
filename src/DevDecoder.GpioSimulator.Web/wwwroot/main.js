@@ -704,7 +704,14 @@ function closeTooltip() {
 
 function setupWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws?client=ui`);
+    const wsUrl = `${protocol}//${window.location.host}/ws?client=ui`;
+    
+    const authGuid = "{{AUTH_GUID}}";
+    if (authGuid && !authGuid.includes("AUTH" + "_GUID")) {
+        ws = new WebSocket(wsUrl, ["simulator-admin-token-" + authGuid]);
+    } else {
+        ws = new WebSocket(wsUrl);
+    }
     
     ws.onopen = () => {
         log("WebSocket Connected to Simulator Server.");

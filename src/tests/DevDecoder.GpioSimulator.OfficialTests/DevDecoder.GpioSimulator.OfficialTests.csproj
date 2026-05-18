@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\DevDecoder.GpioSimulator.Tests\**\*.cs" Exclude="..\DevDecoder.GpioSimulator.Tests\obj\**;..\DevDecoder.GpioSimulator.Tests\bin\**" Link="%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\DevDecoder.GpioSimulator.Tests\**\*.cs" Exclude="..\DevDecoder.GpioSimulator.Tests\obj\**;..\DevDecoder.GpioSimulator.Tests\bin\**;..\DevDecoder.GpioSimulator.Tests\WebSocketAdminTests.cs" Link="%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

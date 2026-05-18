@@ -4,12 +4,11 @@ using System.Collections.Generic;
 
 namespace DevDecoder.GpioSimulator.Common
 {
+    public record PinState(string Mode, string Value, string OwnerId, string OwnerType);
+
     public class GpioSimulatorEngine
     {
-        private readonly ConcurrentDictionary<int, string> _pinModes = new ConcurrentDictionary<int, string>();
-        private readonly ConcurrentDictionary<int, string> _pinValues = new ConcurrentDictionary<int, string>();
-        private readonly ConcurrentDictionary<int, string> _pinOwnerIds = new ConcurrentDictionary<int, string>();
-        private readonly ConcurrentDictionary<int, string> _pinOwnerTypes = new ConcurrentDictionary<int, string>();
+        private readonly ConcurrentDictionary<int, PinState> _pinStates = new ConcurrentDictionary<int, PinState>();
 
         public event Action<int, string, string, string, string>? PinStateChanged; // physicalPin, mode, value, ownerId, ownerType
         public event Action<int>? PinClosed; // physicalPin
@@ -97,83 +96,135 @@ namespace DevDecoder.GpioSimulator.Common
                 return false;
             }
 
-            if (_pinModes.ContainsKey(physicalPin))
+            var defaultVal = mode == "InputPullUp" ? "High" : "Low";
+            var newState = new PinState(mode, defaultVal, ownerId, ownerType);
+
+            if (!_pinStates.TryAdd(physicalPin, newState))
             {
                 errorType = "InvalidOperationException";
                 errorMessage = $"Pin {physicalPin} is already open.";
                 return false;
             }
 
-            _pinModes[physicalPin] = mode;
-            var defaultVal = mode == "InputPullUp" ? "High" : "Low";
-            _pinValues[physicalPin] = defaultVal;
-            _pinOwnerIds[physicalPin] = ownerId;
-            _pinOwnerTypes[physicalPin] = ownerType;
-
             PinStateChanged?.Invoke(physicalPin, mode, defaultVal, ownerId, ownerType);
             return true;
         }
 
-        public void ClosePin(int physicalPin)
+        private bool CheckAccess(int physicalPin, string clientId, bool isAdmin, out string? errorType, out string? errorMessage)
         {
-            if (_pinModes.TryRemove(physicalPin, out _))
+            errorType = null;
+            errorMessage = null;
+
+            if (!_pinStates.TryGetValue(physicalPin, out var state))
             {
-                _pinValues.TryRemove(physicalPin, out _);
-                _pinOwnerIds.TryRemove(physicalPin, out _);
-                _pinOwnerTypes.TryRemove(physicalPin, out _);
+                errorType = "InvalidOperationException";
+                errorMessage = $"Pin {physicalPin} is not open.";
+                return false;
+            }
+
+            if (state.OwnerId != clientId && !isAdmin)
+            {
+                errorType = "UnauthorizedAccessException";
+                errorMessage = $"Client is not authorized to perform this action on pin {physicalPin}. It is owned by {state.OwnerId}.";
+                return false;
+            }
+
+            return true;
+        }
+
+        public bool TryClosePin(int physicalPin, string clientId, bool isAdmin, out string? errorType, out string? errorMessage)
+        {
+            if (!CheckAccess(physicalPin, clientId, isAdmin, out errorType, out errorMessage)) return false;
+
+            if (_pinStates.TryRemove(physicalPin, out _))
+            {
                 PinClosed?.Invoke(physicalPin);
             }
+            return true;
         }
 
-        public void WritePin(int physicalPin, string value, string ownerId, string ownerType)
+        public bool TryWritePin(int physicalPin, string value, string clientId, bool isAdmin, out string? errorType, out string? errorMessage)
         {
-            if (!_pinModes.ContainsKey(physicalPin)) return;
+            if (!CheckAccess(physicalPin, clientId, isAdmin, out errorType, out errorMessage)) return false;
 
-            _pinValues[physicalPin] = value;
-            PinStateChanged?.Invoke(physicalPin, _pinModes[physicalPin], value, ownerId, ownerType);
+            while (true)
+            {
+                if (!_pinStates.TryGetValue(physicalPin, out var state)) return false;
+                var newState = state with { Value = value };
+                if (_pinStates.TryUpdate(physicalPin, newState, state))
+                {
+                    PinStateChanged?.Invoke(physicalPin, newState.Mode, newState.Value, newState.OwnerId, newState.OwnerType);
+                    break;
+                }
+            }
+            return true;
         }
 
-        public string ReadPin(int physicalPin)
+        public bool TryReadPin(int physicalPin, string clientId, bool isAdmin, out string value, out string? errorType, out string? errorMessage)
         {
-            return _pinValues.TryGetValue(physicalPin, out var val) ? val : "Low";
+            value = "Low";
+            if (!CheckAccess(physicalPin, clientId, isAdmin, out errorType, out errorMessage)) return false;
+
+            if (_pinStates.TryGetValue(physicalPin, out var state))
+            {
+                value = state.Value;
+                return true;
+            }
+            
+            errorType = "InvalidOperationException";
+            errorMessage = $"Pin {physicalPin} is not open.";
+            return false;
         }
 
-        public void SetPinMode(int physicalPin, string mode)
+        public bool TrySetPinMode(int physicalPin, string mode, string clientId, bool isAdmin, out string? errorType, out string? errorMessage)
         {
-            if (!_pinModes.ContainsKey(physicalPin)) return;
+            if (!CheckAccess(physicalPin, clientId, isAdmin, out errorType, out errorMessage)) return false;
 
-            _pinModes[physicalPin] = mode;
-            var defaultVal = mode == "InputPullUp" ? "High" : "Low";
-            _pinValues[physicalPin] = defaultVal;
-
-            _pinOwnerIds.TryGetValue(physicalPin, out var ownerId);
-            _pinOwnerTypes.TryGetValue(physicalPin, out var ownerType);
-
-            PinStateChanged?.Invoke(physicalPin, mode, defaultVal, ownerId ?? "", ownerType ?? "");
+            while (true)
+            {
+                if (!_pinStates.TryGetValue(physicalPin, out var state)) return false;
+                var defaultVal = mode == "InputPullUp" ? "High" : "Low";
+                var newState = state with { Mode = mode, Value = defaultVal };
+                if (_pinStates.TryUpdate(physicalPin, newState, state))
+                {
+                    PinStateChanged?.Invoke(physicalPin, newState.Mode, newState.Value, newState.OwnerId, newState.OwnerType);
+                    break;
+                }
+            }
+            return true;
         }
 
         public string GetPinMode(int physicalPin)
         {
-            return _pinModes.TryGetValue(physicalPin, out var mode) ? mode : "None";
+            return _pinStates.TryGetValue(physicalPin, out var state) ? state.Mode : "None";
         }
 
         public bool IsPinOpen(int physicalPin)
         {
-            return _pinModes.ContainsKey(physicalPin);
+            return _pinStates.ContainsKey(physicalPin);
+        }
+
+        public string? GetPinOwnerId(int physicalPin)
+        {
+            return _pinStates.TryGetValue(physicalPin, out var state) ? state.OwnerId : null;
         }
 
         public Dictionary<int, (string Mode, string Value, string OwnerId, string OwnerType)> GetAllPinStates()
         {
             var states = new Dictionary<int, (string Mode, string Value, string OwnerId, string OwnerType)>();
-            foreach (var pin in _pinModes.Keys)
+            foreach (var kvp in _pinStates)
             {
-                _pinModes.TryGetValue(pin, out var mode);
-                _pinValues.TryGetValue(pin, out var value);
-                _pinOwnerIds.TryGetValue(pin, out var ownerId);
-                _pinOwnerTypes.TryGetValue(pin, out var ownerType);
-                states[pin] = (mode ?? "None", value ?? "Low", ownerId ?? "", ownerType ?? "");
+                var state = kvp.Value;
+                states[kvp.Key] = (state.Mode, state.Value, state.OwnerId, state.OwnerType);
             }
             return states;
         }
     }
 }
+
+#if NETSTANDARD2_0 || NETSTANDARD2_1 || NETCOREAPP2_0 || NETCOREAPP2_1 || NETCOREAPP2_2 || NETCOREAPP3_0 || NETCOREAPP3_1 || NET45 || NET451 || NET452 || NET46 || NET461 || NET462 || NET47 || NET471 || NET472 || NET48
+namespace System.Runtime.CompilerServices
+{
+    internal static class IsExternalInit { }
+}
+#endif
