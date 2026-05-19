@@ -45,10 +45,6 @@ namespace DevDecoder.GpioSimulator.Sample
 
             _controller = new GpioController(defaultScheme);
 
-            // Default startup configuration matching Pi 5 test
-            OpenPin(_controller, 3, PinMode.Output);
-            OpenPin(_controller, 5, PinMode.Input);
-
             lock (_consoleLock)
             {
                 Console.ForegroundColor = ConsoleColor.Green;
