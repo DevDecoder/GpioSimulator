@@ -8,16 +8,12 @@ namespace DevDecoder.GpioSimulator.Sample
 {
     class Program
     {
-        private static readonly Dictionary<int, PinMode> _pins = new Dictionary<int, PinMode>();
-        private static readonly Dictionary<int, PinValue> _lastValues = new Dictionary<int, PinValue>();
         private static readonly object _consoleLock = new object();
-
         private static GpioController _controller = null!;
-        private static CancellationTokenSource _watcherCts = new CancellationTokenSource();
-        private static Task _watcherTask = null!;
 
         static void Main(string[] args)
         {
+            ReadLine.AutoCompletionHandler = new CommandAutoCompleteHandler();
             lock (_consoleLock)
             {
                 Console.ForegroundColor = ConsoleColor.Cyan;
@@ -60,39 +56,23 @@ namespace DevDecoder.GpioSimulator.Sample
                 Console.ResetColor();
                 Console.WriteLine("Type 'help' to see list of interactive commands.");
                 PrintPinsStatus(_controller);
-                PrintPrompt();
             }
-
-            // Background task to watch for dynamic input transitions from the Web UI
-            _watcherCts = new CancellationTokenSource();
-            _watcherTask = Task.Run(() => WatchInputPins(_controller, _watcherCts.Token));
 
             while (true)
             {
-                string? input = Console.ReadLine();
+                string input = ReadLine.Read("GpioSim> ");
                 if (string.IsNullOrWhiteSpace(input))
                 {
-                    lock (_consoleLock)
-                    {
-                        PrintPrompt();
-                    }
                     continue;
                 }
+
+                ReadLine.AddHistory(input);
 
                 string[] parts = input.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                 string cmd = parts[0].ToLower();
 
                 if (cmd == "exit" || cmd == "quit" || cmd == "q")
                 {
-                    _watcherCts.Cancel();
-                    try
-                    {
-                        _watcherTask.Wait();
-                    }
-                    catch
-                    {
-                        // Absorb
-                    }
                     _controller.Dispose();
                     break;
                 }
@@ -109,9 +89,7 @@ namespace DevDecoder.GpioSimulator.Sample
                             case "sc":
                                 if (parts.Length < 2)
                                 {
-                                    Console.ForegroundColor = ConsoleColor.Red;
-                                    Console.WriteLine("Error: Please specify scheme. Syntax: scheme <logical|board>");
-                                    Console.ResetColor();
+                                    WriteError("Error: Please specify scheme. Syntax: scheme <logical|board>");
                                     break;
                                 }
                                 string newSchemeStr = parts[1].ToLower();
@@ -127,9 +105,7 @@ namespace DevDecoder.GpioSimulator.Sample
 
                                 if (newScheme == null)
                                 {
-                                    Console.ForegroundColor = ConsoleColor.Red;
-                                    Console.WriteLine($"Error: Invalid scheme '{parts[1]}'. Use 'logical' or 'board'.");
-                                    Console.ResetColor();
+                                    WriteError($"Error: Invalid scheme '{parts[1]}'. Use 'logical' or 'board'.");
                                     break;
                                 }
 
@@ -145,23 +121,13 @@ namespace DevDecoder.GpioSimulator.Sample
                                 Console.WriteLine($"Switching numbering scheme to {newScheme}... Resetting simulator state.");
                                 Console.ResetColor();
 
-                                // 1. Shut down old watcher
-                                _watcherCts.Cancel();
-                                try { _watcherTask.Wait(); } catch {}
-
-                                // 2. Clear old state
-                                lock (_pins) _pins.Clear();
-                                lock (_lastValues) _lastValues.Clear();
-
-                                // 3. Dispose and re-instantiate controller
+                                // 1. Dispose old controller
                                 _controller.Dispose();
+
+                                // 2. Start fresh controller
                                 _controller = new GpioController(newScheme.Value);
 
-                                // 4. Start fresh watcher
-                                _watcherCts = new CancellationTokenSource();
-                                _watcherTask = Task.Run(() => WatchInputPins(_controller, _watcherCts.Token));
-
-                                // 5. Setup default pins under new scheme
+                                // 3. Setup default pins under new scheme
                                 OpenPin(_controller, 3, PinMode.Output);
                                 OpenPin(_controller, 5, PinMode.Input);
 
@@ -182,9 +148,7 @@ namespace DevDecoder.GpioSimulator.Sample
                             case "o":
                                 if (parts.Length < 3)
                                 {
-                                    Console.ForegroundColor = ConsoleColor.Red;
-                                    Console.WriteLine("Error: Please specify pin and mode. Syntax: open <pin> <in|out|pullup|pulldown>");
-                                    Console.ResetColor();
+                                    WriteError("Error: Please specify pin and mode. Syntax: open <pin> <in|out|pullup|pulldown>");
                                     break;
                                 }
                                 if (int.TryParse(parts[1], out int openPin))
@@ -212,14 +176,14 @@ namespace DevDecoder.GpioSimulator.Sample
                                 }
                                 else
                                 {
-                                    Console.WriteLine("Error: Invalid pin number.");
+                                    WriteError("Error: Invalid pin number.");
                                 }
                                 break;
                             case "close":
                             case "c":
                                 if (parts.Length < 2 || !int.TryParse(parts[1], out int closePin))
                                 {
-                                    Console.WriteLine("Error: Please specify pin number. Syntax: close <pin>");
+                                    WriteError("Error: Please specify pin number. Syntax: close <pin>");
                                     break;
                                 }
                                 ClosePin(controller, closePin);
@@ -229,58 +193,26 @@ namespace DevDecoder.GpioSimulator.Sample
                             case "w":
                                 if (parts.Length < 3)
                                 {
-                                    Console.WriteLine("Error: Please specify pin and value. Syntax: write <pin> <1|0|high|low>");
+                                    WriteError("Error: Please specify pin and value. Syntax: write <pin> <1|0|high|low>");
                                     break;
                                 }
                                 if (int.TryParse(parts[1], out int writePin))
                                 {
-                                    bool isOpen = false;
-                                    PinMode currentMode = PinMode.Input;
-                                    
-                                    lock (_pins)
-                                    {
-                                        isOpen = _pins.TryGetValue(writePin, out currentMode);
-                                    }
-
-                                    if (!isOpen)
-                                    {
-                                        Console.WriteLine($"Error: Pin {writePin} is not open. Use 'open {writePin} out' first.");
-                                        break;
-                                    }
-                                    if (currentMode != PinMode.Output)
-                                    {
-                                        Console.WriteLine($"Error: Pin {writePin} is configured as Input. Cannot write to it.");
-                                        break;
-                                    }
                                     string valStr = parts[2].ToLower();
                                     PinValue val = valStr == "1" || valStr == "high" || valStr == "h" ? PinValue.High : PinValue.Low;
                                     controller.Write(writePin, val);
-                                    lock (_lastValues)
-                                    {
-                                        _lastValues[writePin] = val;
-                                    }
                                     Console.WriteLine($"Wrote {val} to Pin {writePin}.");
                                 }
                                 else
                                 {
-                                    Console.WriteLine("Error: Invalid pin number.");
+                                    WriteError("Error: Invalid pin number.");
                                 }
                                 break;
                             case "read":
                             case "r":
                                 if (parts.Length < 2 || !int.TryParse(parts[1], out int readPin))
                                 {
-                                    Console.WriteLine("Error: Please specify pin number. Syntax: read <pin>");
-                                    break;
-                                }
-                                bool isReadOpen = false;
-                                lock (_pins)
-                                {
-                                    isReadOpen = _pins.ContainsKey(readPin);
-                                }
-                                if (!isReadOpen)
-                                {
-                                    Console.WriteLine($"Error: Pin {readPin} is not open.");
+                                    WriteError("Error: Please specify pin number. Syntax: read <pin>");
                                     break;
                                 }
                                 PinValue readVal = controller.Read(readPin);
@@ -291,21 +223,11 @@ namespace DevDecoder.GpioSimulator.Sample
                             case "set":
                                 if (parts.Length < 3)
                                 {
-                                    Console.WriteLine("Error: Please specify pin and mode. Syntax: setmode <pin> <in|out|pullup|pulldown>");
+                                    WriteError("Error: Please specify pin and mode. Syntax: setmode <pin> <in|out|pullup|pulldown>");
                                     break;
                                 }
                                 if (int.TryParse(parts[1], out int smPin))
                                 {
-                                    bool isOpen = false;
-                                    lock (_pins)
-                                    {
-                                        isOpen = _pins.ContainsKey(smPin);
-                                    }
-                                    if (!isOpen)
-                                    {
-                                        Console.WriteLine($"Error: Pin {smPin} is not open.");
-                                        break;
-                                    }
                                     string modeStr = parts[2].ToLower();
                                     PinMode mode;
                                     if (modeStr == "out" || modeStr == "output")
@@ -324,27 +246,34 @@ namespace DevDecoder.GpioSimulator.Sample
                                     {
                                         mode = PinMode.Input;
                                     }
+
+                                    // Unregister first if previously input
+                                    try
+                                    {
+                                        controller.UnregisterCallbackForPinValueChangedEvent(smPin, OnPinValueChanged);
+                                    }
+                                    catch {}
+
                                     controller.SetPinMode(smPin, mode);
-                                    lock (_pins)
+
+                                    // Register if it became input
+                                    if (mode == PinMode.Input || mode == PinMode.InputPullUp || mode == PinMode.InputPullDown)
                                     {
-                                        _pins[smPin] = mode;
+                                        controller.RegisterCallbackForPinValueChangedEvent(smPin, PinEventTypes.Rising | PinEventTypes.Falling, OnPinValueChanged);
                                     }
-                                    lock (_lastValues)
-                                    {
-                                        _lastValues[smPin] = controller.Read(smPin);
-                                    }
+
                                     Console.WriteLine($"Successfully set Pin {smPin} mode to {mode}.");
                                 }
                                 else
                                 {
-                                    Console.WriteLine("Error: Invalid pin number.");
+                                    WriteError("Error: Invalid pin number.");
                                 }
                                 break;
                             case "isopen":
                             case "io":
                                 if (parts.Length < 2 || !int.TryParse(parts[1], out int ioPin))
                                 {
-                                    Console.WriteLine("Error: Please specify pin number. Syntax: isopen <pin>");
+                                    WriteError("Error: Please specify pin number. Syntax: isopen <pin>");
                                     break;
                                 }
                                 bool isPinOpen = controller.IsPinOpen(ioPin);
@@ -354,7 +283,7 @@ namespace DevDecoder.GpioSimulator.Sample
                             case "is":
                                 if (parts.Length < 3)
                                 {
-                                    Console.WriteLine("Error: Please specify pin and mode. Syntax: issupported <pin> <in|out|pullup|pulldown>");
+                                    WriteError("Error: Please specify pin and mode. Syntax: issupported <pin> <in|out|pullup|pulldown>");
                                     break;
                                 }
                                 if (int.TryParse(parts[1], out int suppPin))
@@ -382,7 +311,7 @@ namespace DevDecoder.GpioSimulator.Sample
                                 }
                                 else
                                 {
-                                    Console.WriteLine("Error: Invalid pin number.");
+                                    WriteError("Error: Invalid pin number.");
                                 }
                                 break;
                             default:
@@ -394,42 +323,41 @@ namespace DevDecoder.GpioSimulator.Sample
                     }
                     catch (Exception ex)
                     {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"Execution error: {ex.Message}");
-                        Console.ResetColor();
+                        WriteError($"Execution error: {ex.Message}");
                     }
-
-                    PrintPrompt();
                 }
             }
 
             Console.WriteLine("Shutting down sample program. Goodbye!");
         }
 
+        private static void WriteError(string message)
+        {
+            lock (_consoleLock)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine(message);
+                Console.ResetColor();
+            }
+        }
+
         private static void OpenPin(GpioController controller, int pin, PinMode mode)
         {
             controller.OpenPin(pin, mode);
-            lock (_pins)
+            if (mode == PinMode.Input || mode == PinMode.InputPullUp || mode == PinMode.InputPullDown)
             {
-                _pins[pin] = mode;
-            }
-            lock (_lastValues)
-            {
-                _lastValues[pin] = controller.Read(pin);
+                controller.RegisterCallbackForPinValueChangedEvent(pin, PinEventTypes.Rising | PinEventTypes.Falling, OnPinValueChanged);
             }
         }
 
         private static void ClosePin(GpioController controller, int pin)
         {
+            try
+            {
+                controller.UnregisterCallbackForPinValueChangedEvent(pin, OnPinValueChanged);
+            }
+            catch {}
             controller.ClosePin(pin);
-            lock (_pins)
-            {
-                _pins.Remove(pin);
-            }
-            lock (_lastValues)
-            {
-                _lastValues.Remove(pin);
-            }
         }
 
         private static void PrintPrompt()
@@ -448,7 +376,6 @@ namespace DevDecoder.GpioSimulator.Sample
             Console.WriteLine("  isopen <pin>                         - Check if a pin is currently open");
             Console.WriteLine("  issupported <pin> <mode>             - Check if a pin mode is supported");
             Console.WriteLine("  scheme <logical|board>               - Switch dynamic pin numbering scheme (e.g. scheme board)");
-            Console.WriteLine("  schema <logical|board>               - Alias for scheme command");
             Console.WriteLine("  status                               - Display status of all currently opened pins");
             Console.WriteLine("  help                                 - Show this guide");
             Console.WriteLine("  exit | quit | q                      - Terminate the simulation program");
@@ -458,91 +385,41 @@ namespace DevDecoder.GpioSimulator.Sample
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"\n--- Current Open Pins Status (Scheme: {controller.NumberingScheme}) ---");
-            int pinCount = 0;
-            lock (_pins)
+            
+            bool anyOpen = false;
+            // Standard Raspberry Pi headers have 40 pins. Loop through 1 to 40 to query open pins.
+            for (int pin = 1; pin <= 40; pin++)
             {
-                pinCount = _pins.Count;
+                try
+                {
+                    if (controller.IsPinOpen(pin))
+                    {
+                        anyOpen = true;
+                        PinMode mode = controller.GetPinMode(pin);
+                        PinValue currentVal = controller.Read(pin);
+                        Console.WriteLine($"  * Pin {pin.ToString().PadRight(2)} | Mode: {mode.ToString().PadRight(6)} | Value: {currentVal}");
+                    }
+                }
+                catch {}
             }
 
-            if (pinCount == 0)
+            if (!anyOpen)
             {
-                Console.WriteLine("No pins are currently open.");
-            }
-            else
-            {
-                List<KeyValuePair<int, PinMode>> sortedPins;
-                lock (_pins)
-                {
-                    sortedPins = new List<KeyValuePair<int, PinMode>>(_pins);
-                }
-                sortedPins.Sort((a, b) => a.Key.CompareTo(b.Key));
-
-                foreach (var kvp in sortedPins)
-                {
-                    PinValue currentVal = controller.Read(kvp.Key);
-                    Console.WriteLine($"  * Pin {kvp.Key.ToString().PadRight(2)} | Mode: {kvp.Value.ToString().PadRight(6)} | Value: {currentVal}");
-                }
+                Console.WriteLine("No pins are currently open on this controller.");
             }
             Console.WriteLine("--------------------------------");
             Console.ResetColor();
         }
 
-        private static void WatchInputPins(GpioController controller, CancellationToken token)
+        private static void OnPinValueChanged(object sender, PinValueChangedEventArgs args)
         {
-            try
+            PinValue val = _controller.Read(args.PinNumber);
+            lock (_consoleLock)
             {
-                while (!token.IsCancellationRequested)
-                {
-                    // Copy pin keys under lock or safe enumeration to prevent concurrent mods
-                    List<int> openInputPins = new List<int>();
-                    lock (_pins)
-                    {
-                        foreach (var kvp in _pins)
-                        {
-                            if (kvp.Value == PinMode.Input || kvp.Value == PinMode.InputPullUp || kvp.Value == PinMode.InputPullDown)
-                            {
-                                openInputPins.Add(kvp.Key);
-                            }
-                        }
-                    }
-
-                    foreach (var pin in openInputPins)
-                    {
-                        PinValue val = controller.Read(pin);
-                        bool hasLastVal = false;
-                        PinValue lastVal = PinValue.Low;
-
-                        lock (_lastValues)
-                        {
-                            if (_lastValues.TryGetValue(pin, out lastVal))
-                            {
-                                hasLastVal = true;
-                            }
-                        }
-
-                        if (hasLastVal && val != lastVal)
-                        {
-                            lock (_consoleLock)
-                            {
-                                Console.ForegroundColor = ConsoleColor.Magenta;
-                                Console.Write($"\n[ALERT] Input state changed: Pin {pin} is now {val}!");
-                                Console.ResetColor();
-                                PrintPrompt();
-                            }
-
-                            lock (_lastValues)
-                            {
-                                _lastValues[pin] = val;
-                            }
-                        }
-                    }
-
-                    Thread.Sleep(100);
-                }
-            }
-            catch
-            {
-                // Silently shut down watcher thread
+                Console.ForegroundColor = ConsoleColor.Magenta;
+                Console.Write($"\n[ALERT] Input state changed: Pin {args.PinNumber} is now {val}!");
+                Console.ResetColor();
+                PrintPrompt();
             }
         }
     }
