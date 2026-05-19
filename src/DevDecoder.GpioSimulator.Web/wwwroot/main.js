@@ -594,7 +594,7 @@ function refreshTooltipContent(pin, anchorEl) {
                 const newState = e.target.checked ? "High" : "Low";
                 pinsStateMap[pin.physical].value = newState;
                 log(`Input manually driven to ${newState} on Pin ${pin.physical}`);
-                sendPinState(pin.physical, "read", newState);
+                sendPinState(pin.physical, "write", newState);
                 updatePinVisuals(pin.physical);
             };
         }
@@ -609,7 +609,7 @@ function refreshTooltipContent(pin, anchorEl) {
                 e.preventDefault();
                 pinsStateMap[pin.physical].value = pressedState;
                 log(`Pull-button pressed: Pin ${pin.physical} driven to ${pressedState}`);
-                sendPinState(pin.physical, "read", pressedState);
+                sendPinState(pin.physical, "write", pressedState);
                 updatePinVisuals(pin.physical);
             };
             
@@ -617,7 +617,7 @@ function refreshTooltipContent(pin, anchorEl) {
                 e.preventDefault();
                 pinsStateMap[pin.physical].value = defaultState;
                 log(`Pull-button released: Pin ${pin.physical} reverted to default ${defaultState}`);
-                sendPinState(pin.physical, "read", defaultState);
+                sendPinState(pin.physical, "write", defaultState);
                 updatePinVisuals(pin.physical);
             };
             
@@ -661,7 +661,7 @@ function startHoldAction(pin) {
     
     state.value = pressedState;
     log(`Hotspot hold started: Pin ${pin.physical} driven to ${pressedState}`);
-    sendPinState(pin.physical, "read", pressedState);
+    sendPinState(pin.physical, "write", pressedState);
     updatePinVisuals(pin.physical);
     
     if (activeTooltipPin && activeTooltipPin.physical === pin.physical) {
@@ -685,7 +685,7 @@ function endHoldAction(pin) {
             
             state.value = defaultState;
             log(`Hotspot hold released: Pin ${pin.physical} reverted to default ${defaultState}`);
-            sendPinState(pin.physical, "read", defaultState);
+            sendPinState(pin.physical, "write", defaultState);
             updatePinVisuals(pin.physical);
             
             if (activeTooltipPin && activeTooltipPin.physical === pin.physical) {

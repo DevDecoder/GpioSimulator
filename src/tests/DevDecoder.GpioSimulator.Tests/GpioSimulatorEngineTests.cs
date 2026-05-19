@@ -18,13 +18,12 @@ namespace DevDecoder.GpioSimulator.Tests
         {
             var engine = CreateEngine();
             int pin = 4;
-            string clientId = "client-1";
-            string clientType = "app";
+            var client = engine.Connect("client-1", "app", false);
 
-            bool success = engine.TryOpenPin(pin, "Output", clientId, clientType, out var errorType, out var errorMessage);
+            var result = client.OpenPin(pin, "Output");
 
-            Assert.True(success);
-            Assert.Equal(clientId, engine.GetPinOwnerId(pin));
+            Assert.True(result.Success);
+            Assert.Equal("client-1", client.GetPinOwnerId(pin).Value);
         }
 
         [Fact]
@@ -33,12 +32,14 @@ namespace DevDecoder.GpioSimulator.Tests
             var engine = CreateEngine();
             int pin = 4;
             
-            engine.TryOpenPin(pin, "Output", "client-1", "app", out _, out _);
+            var client1 = engine.Connect("client-1", "app", false);
+            client1.OpenPin(pin, "Output");
 
-            bool success = engine.TryOpenPin(pin, "Output", "client-2", "app", out var errorType, out var errorMessage);
+            var client2 = engine.Connect("client-2", "app", false);
+            var result = client2.OpenPin(pin, "Output");
 
-            Assert.False(success);
-            Assert.Equal("InvalidOperationException", errorType);
+            Assert.False(result.Success);
+            Assert.Equal("InvalidOperationException", result.ErrorType);
         }
 
         [Fact]
@@ -46,13 +47,13 @@ namespace DevDecoder.GpioSimulator.Tests
         {
             var engine = CreateEngine();
             int pin = 4;
-            string clientId = "client-1";
+            var client = engine.Connect("client-1", "app", false);
             
-            engine.TryOpenPin(pin, "Output", clientId, "app", out _, out _);
-            bool success = engine.TryClosePin(pin, clientId, false, out _, out _);
+            client.OpenPin(pin, "Output");
+            var result = client.ClosePin(pin);
 
-            Assert.True(success);
-            Assert.Null(engine.GetPinOwnerId(pin));
+            Assert.True(result.Success);
+            Assert.Null(client.GetPinOwnerId(pin).Value);
         }
 
         [Fact]
@@ -60,16 +61,63 @@ namespace DevDecoder.GpioSimulator.Tests
         {
             var engine = CreateEngine();
             int pin = 4;
-            string clientId = "client-1";
+            var client = engine.Connect("client-1", "app", false);
             
-            engine.TryOpenPin(pin, "Output", clientId, "app", out _, out _);
+            client.OpenPin(pin, "Output");
             
-            bool writeSuccess = engine.TryWritePin(pin, "High", clientId, false, out _, out _);
-            Assert.True(writeSuccess);
+            var writeResult = client.WritePin(pin, "High");
+            Assert.True(writeResult.Success);
             
-            bool readSuccess = engine.TryReadPin(pin, clientId, false, out var val, out _, out _);
-            Assert.True(readSuccess);
-            Assert.Equal("High", val);
+            var readResult = client.ReadPin(pin);
+            Assert.True(readResult.Success);
+            Assert.Equal("High", readResult.Value);
+        }
+
+        [Fact]
+        public void NonAdmin_Cannot_Modify_Others_Pin()
+        {
+            var engine = CreateEngine();
+            int pin = 4;
+            
+            var client1 = engine.Connect("client-1", "app", false);
+            client1.OpenPin(pin, "Output");
+
+            var client2 = engine.Connect("client-2", "app", false);
+            
+            var writeResult = client2.WritePin(pin, "High");
+            Assert.False(writeResult.Success);
+            Assert.Equal("UnauthorizedAccessException", writeResult.ErrorType);
+
+            var readResult = client2.ReadPin(pin);
+            Assert.False(readResult.Success);
+            Assert.Equal("UnauthorizedAccessException", readResult.ErrorType);
+
+            var closeResult = client2.ClosePin(pin);
+            Assert.False(closeResult.Success);
+            Assert.Equal("UnauthorizedAccessException", closeResult.ErrorType);
+        }
+
+        [Fact]
+        public void Admin_Can_Modify_Others_Pin()
+        {
+            var engine = CreateEngine();
+            int pin = 4;
+            
+            var client1 = engine.Connect("client-1", "app", false);
+            client1.OpenPin(pin, "Output");
+
+            var adminClient = engine.Connect("admin-client", "test_harness", true);
+            
+            var writeResult = adminClient.WritePin(pin, "High");
+            Assert.True(writeResult.Success);
+
+            var readResult = adminClient.ReadPin(pin);
+            Assert.True(readResult.Success);
+            Assert.Equal("High", readResult.Value);
+
+            var closeResult = adminClient.ClosePin(pin);
+            Assert.True(closeResult.Success);
+            Assert.Null(adminClient.GetPinOwnerId(pin).Value);
         }
     }
 }

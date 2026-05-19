@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using DevDecoder.GpioSimulator.Common;
+using DevDecoder.GpioSimulator.Web;
 
 var contentRoot = AppContext.BaseDirectory;
 var dir = new DirectoryInfo(contentRoot);
@@ -371,6 +372,8 @@ app.Use(async (context, next) =>
             engine.PinClosed += closeHandler;
             engine.BoardChanged += boardHandler;
 
+            var simulatorClient = engine.Connect(clientId.ToString(), clientType, connection.IsAuthorizedAdmin);
+
             try
             {
                 // Send connection and initial board state
@@ -464,7 +467,8 @@ app.Use(async (context, next) =>
                         {
                             var mode = root.GetProperty("mode").GetString() ?? "Input";
                             
-                            if (engine.TryOpenPin(physPin, mode, clientId.ToString(), clientType, out var errorType, out var errorMessage))
+                            var opResult = simulatorClient.OpenPin(physPin, mode);
+                            if (opResult)
                             {
                                 if (requestId != null)
                                 {
@@ -479,20 +483,21 @@ app.Use(async (context, next) =>
                                     action = "open_response",
                                     requestId = requestId,
                                     status = "error",
-                                    errorType = errorType,
-                                    errorMessage = errorMessage
+                                    errorType = opResult.ErrorType,
+                                    errorMessage = opResult.ErrorMessage
                                 });
                                 await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
                             }
                         }
-                        if (action == "write")
+                        else if (action == "write")
                         {
                             var val = root.TryGetProperty("value", out var vProp) ? (vProp.GetString() ?? "Low") : "Low";
-                            if (!engine.TryWritePin(physPin, val, clientId.ToString(), connection.IsAuthorizedAdmin, out var errType, out var errMsg))
+                            var opResult = simulatorClient.WritePin(physPin, val);
+                            if (!opResult)
                             {
                                 if (requestId != null)
                                 {
-                                    var resp = JsonSerializer.Serialize(new { action = "write_response", requestId = requestId, status = "error", errorType = errType, errorMessage = errMsg });
+                                    var resp = JsonSerializer.Serialize(new { action = "write_response", requestId = requestId, status = "error", errorType = opResult.ErrorType, errorMessage = opResult.ErrorMessage });
                                     await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
                                 }
                             }
@@ -506,14 +511,15 @@ app.Use(async (context, next) =>
                         {
                             if (requestId != null)
                             {
-                                if (engine.TryReadPin(physPin, clientId.ToString(), connection.IsAuthorizedAdmin, out var val, out var errType, out var errMsg))
+                                var opResult = simulatorClient.ReadPin(physPin);
+                                if (opResult)
                                 {
-                                    var resp = JsonSerializer.Serialize(new { action = "read_response", requestId = requestId, status = "success", value = val });
+                                    var resp = JsonSerializer.Serialize(new { action = "read_response", requestId = requestId, status = "success", value = opResult.Value });
                                     await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
                                 }
                                 else
                                 {
-                                    var resp = JsonSerializer.Serialize(new { action = "read_response", requestId = requestId, status = "error", errorType = errType, errorMessage = errMsg });
+                                    var resp = JsonSerializer.Serialize(new { action = "read_response", requestId = requestId, status = "error", errorType = opResult.ErrorType, errorMessage = opResult.ErrorMessage });
                                     await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
                                 }
                             }
@@ -521,11 +527,12 @@ app.Use(async (context, next) =>
                         else if (action == "mode")
                         {
                             var mode = root.TryGetProperty("mode", out var mProp) ? (mProp.GetString() ?? "Input") : "Input";
-                            if (!engine.TrySetPinMode(physPin, mode, clientId.ToString(), connection.IsAuthorizedAdmin, out var errType, out var errMsg))
+                            var opResult = simulatorClient.SetPinMode(physPin, mode);
+                            if (!opResult)
                             {
                                 if (requestId != null)
                                 {
-                                    var resp = JsonSerializer.Serialize(new { action = "mode_response", requestId = requestId, status = "error", errorType = errType, errorMessage = errMsg });
+                                    var resp = JsonSerializer.Serialize(new { action = "mode_response", requestId = requestId, status = "error", errorType = opResult.ErrorType, errorMessage = opResult.ErrorMessage });
                                     await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
                                 }
                             }
@@ -537,11 +544,12 @@ app.Use(async (context, next) =>
                         }
                         else if (action == "close")
                         {
-                            if (!engine.TryClosePin(physPin, clientId.ToString(), connection.IsAuthorizedAdmin, out var errType, out var errMsg))
+                            var opResult = simulatorClient.ClosePin(physPin);
+                            if (!opResult)
                             {
                                 if (requestId != null)
                                 {
-                                    var resp = JsonSerializer.Serialize(new { action = "close_response", requestId = requestId, status = "error", errorType = errType, errorMessage = errMsg });
+                                    var resp = JsonSerializer.Serialize(new { action = "close_response", requestId = requestId, status = "error", errorType = opResult.ErrorType, errorMessage = opResult.ErrorMessage });
                                     await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(resp)), WebSocketMessageType.Text, true, CancellationToken.None);
                                 }
                             }
@@ -587,14 +595,7 @@ app.Use(async (context, next) =>
 StartShutdownTimer(15);
 app.Run();
 
-public class ClientConnection
-{
-    public Guid ClientId { get; set; }
-    public WebSocket Socket { get; set; } = null!;
-    public string Type { get; set; } = "ui";
-    public string Scheme { get; set; } = "Board";
-    public bool IsAuthorizedAdmin { get; set; }
-}
+
 
 public partial class Program
 {

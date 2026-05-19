@@ -122,14 +122,14 @@ namespace DevDecoder.GpioSimulator.Tests
                 controller.RegisterCallbackForPinValueChangedEvent(4, PinEventTypes.Rising | PinEventTypes.Falling, callback);
 
                 // Act - Simulate physical high external stimulus (button press)
-                driver.SetPinValueByTest(4, PinValue.High);
+                driver.SetPinValue(4, PinValue.High);
                 Thread.Sleep(20);
 
                 Assert.Equal(1, risingCount);
                 Assert.Equal(0, fallingCount);
 
                 // Transition High -> Low (Falling)
-                driver.SetPinValueByTest(4, PinValue.Low);
+                driver.SetPinValue(4, PinValue.Low);
                 Thread.Sleep(20);
 
                 Assert.Equal(1, risingCount);
@@ -170,7 +170,7 @@ namespace DevDecoder.GpioSimulator.Tests
                 System.Threading.Tasks.Task.Run(() =>
                 {
                     Thread.Sleep(100);
-                    driver.SetPinValueByTest(4, PinValue.High);
+                    driver.SetPinValue(4, PinValue.High);
                 });
 
                 var result = controller.WaitForEvent(4, PinEventTypes.Rising, TimeSpan.FromSeconds(2));

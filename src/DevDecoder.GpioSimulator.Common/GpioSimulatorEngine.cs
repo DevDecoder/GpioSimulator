@@ -4,36 +4,66 @@ using System.Collections.Generic;
 
 namespace DevDecoder.GpioSimulator.Common
 {
-    public record PinState(string Mode, string Value, string OwnerId, string OwnerType);
-
+    /// <summary>
+    /// The core simulator engine that manages pin states, board mappings, 
+    /// and coordinates interactions between connected simulator clients.
+    /// </summary>
     public class GpioSimulatorEngine
     {
         private readonly ConcurrentDictionary<int, PinState> _pinStates = new ConcurrentDictionary<int, PinState>();
 
-        public event Action<int, string, string, string, string>? PinStateChanged; // physicalPin, mode, value, ownerId, ownerType
-        public event Action<int>? PinClosed; // physicalPin
-        public event Action<string, Dictionary<int, int>>? BoardChanged; // boardId, activePhysToLog
+        /// <summary>
+        /// Occurs when a pin's mode, value, or ownership changes.
+        /// Arguments: physicalPin, mode, value, ownerId, ownerType.
+        /// </summary>
+        public event Action<int, string, string, string, string>? PinStateChanged;
+
+        /// <summary>
+        /// Occurs when a pin is closed and released.
+        /// Arguments: physicalPin.
+        /// </summary>
+        public event Action<int>? PinClosed;
+
+        /// <summary>
+        /// Occurs when the active board physical-to-logical mapping changes.
+        /// Arguments: boardId, activePhysToLog.
+        /// </summary>
+        public event Action<string, Dictionary<int, int>>? BoardChanged;
 
         private readonly object _mappingLock = new object();
         private string _activeBoardId = "raspberry_pi_5_breakout";
         private Dictionary<int, int> _activePhysToLog = new Dictionary<int, int>();
         private Dictionary<int, int> _activeLogToPhys = new Dictionary<int, int>();
 
+        /// <summary>
+        /// Gets the identifier of the currently loaded board mapping layout.
+        /// </summary>
         public string ActiveBoardId
         {
             get { lock (_mappingLock) return _activeBoardId; }
         }
 
+        /// <summary>
+        /// Gets the current active physical-to-logical pin mapping dictionary.
+        /// </summary>
         public Dictionary<int, int> ActivePhysToLog
         {
             get { lock (_mappingLock) return new Dictionary<int, int>(_activePhysToLog); }
         }
 
+        /// <summary>
+        /// Gets the current active logical-to-physical pin mapping dictionary.
+        /// </summary>
         public Dictionary<int, int> ActiveLogToPhys
         {
             get { lock (_mappingLock) return new Dictionary<int, int>(_activeLogToPhys); }
         }
 
+        /// <summary>
+        /// Loads a new board physical-to-logical pin mapping and updates client lookups.
+        /// </summary>
+        /// <param name="boardId">The unique identifier of the board layout.</param>
+        /// <param name="physToLog">The mapping of physical pins to logical pins.</param>
         public void LoadBoardMapping(string boardId, Dictionary<int, int> physToLog)
         {
             var logToPhys = new Dictionary<int, int>();
@@ -52,6 +82,11 @@ namespace DevDecoder.GpioSimulator.Common
             BoardChanged?.Invoke(boardId, physToLog);
         }
 
+        /// <summary>
+        /// Checks whether the specified pin number is a valid physical pin in the current board layout.
+        /// </summary>
+        /// <param name="physicalPin">The physical pin number to check.</param>
+        /// <returns>True if the physical pin is valid; otherwise, false.</returns>
         public bool IsValidPhysicalPin(int physicalPin)
         {
             lock (_mappingLock)
@@ -60,6 +95,11 @@ namespace DevDecoder.GpioSimulator.Common
             }
         }
 
+        /// <summary>
+        /// Checks whether the specified pin number is a valid logical pin in the current board layout.
+        /// </summary>
+        /// <param name="logicalPin">The logical pin number to check.</param>
+        /// <returns>True if the logical pin is valid; otherwise, false.</returns>
         public bool IsValidLogicalPin(int logicalPin)
         {
             lock (_mappingLock)
@@ -68,6 +108,11 @@ namespace DevDecoder.GpioSimulator.Common
             }
         }
 
+        /// <summary>
+        /// Converts a logical pin number to its mapped physical pin number based on the current layout.
+        /// </summary>
+        /// <param name="logicalPin">The logical pin number.</param>
+        /// <returns>The mapped physical pin number, or -1 if the logical pin is invalid.</returns>
         public int ConvertLogicalToPhysical(int logicalPin)
         {
             lock (_mappingLock)
@@ -76,6 +121,11 @@ namespace DevDecoder.GpioSimulator.Common
             }
         }
 
+        /// <summary>
+        /// Converts a physical pin number to its mapped logical pin number based on the current layout.
+        /// </summary>
+        /// <param name="physicalPin">The physical pin number.</param>
+        /// <returns>The mapped logical pin number, or -1 if the physical pin is invalid.</returns>
         public int ConvertPhysicalToLogical(int physicalPin)
         {
             lock (_mappingLock)
@@ -84,33 +134,38 @@ namespace DevDecoder.GpioSimulator.Common
             }
         }
 
-        public bool TryOpenPin(int physicalPin, string mode, string ownerId, string ownerType, out string? errorType, out string? errorMessage)
+        /// <summary>
+        /// Connects a new client to the simulator engine with specified details.
+        /// </summary>
+        /// <param name="clientId">A unique identity string for the client.</param>
+        /// <param name="clientType">The category of client (e.g. "ui", "controller").</param>
+        /// <param name="isAdmin">Whether the client has admin overrides.</param>
+        /// <returns>An instance of <see cref="IGpioSimulatorClient"/>.</returns>
+        public IGpioSimulatorClient Connect(string clientId, string clientType, bool isAdmin)
         {
-            errorType = null;
-            errorMessage = null;
+            return new GpioSimulatorClient(this, clientId, clientType, isAdmin);
+        }
 
+        internal GSEResult OpenPin(IGpioSimulatorClient client, int physicalPin, string mode)
+        {
             if (!IsValidPhysicalPin(physicalPin))
             {
-                errorType = "ArgumentException";
-                errorMessage = $"Pin {physicalPin} is not a valid physical pin for this board.";
-                return false;
+                return GSEResult.Error("ArgumentException", $"Pin {physicalPin} is not a valid physical pin for this board.");
             }
 
             var defaultVal = mode == "InputPullUp" ? "High" : "Low";
-            var newState = new PinState(mode, defaultVal, ownerId, ownerType);
+            var newState = new PinState(mode, defaultVal, client.ClientId, client.ClientType);
 
             if (!_pinStates.TryAdd(physicalPin, newState))
             {
-                errorType = "InvalidOperationException";
-                errorMessage = $"Pin {physicalPin} is already open.";
-                return false;
+                return GSEResult.Error("InvalidOperationException", $"Pin {physicalPin} is already open.");
             }
 
-            PinStateChanged?.Invoke(physicalPin, mode, defaultVal, ownerId, ownerType);
-            return true;
+            PinStateChanged?.Invoke(physicalPin, mode, defaultVal, client.ClientId, client.ClientType);
+            return GSEResult.OK;
         }
 
-        private bool CheckAccess(int physicalPin, string clientId, bool isAdmin, out string? errorType, out string? errorMessage)
+        private bool CheckAccess(IGpioSimulatorClient client, int physicalPin, out string? errorType, out string? errorMessage)
         {
             errorType = null;
             errorMessage = null;
@@ -122,7 +177,7 @@ namespace DevDecoder.GpioSimulator.Common
                 return false;
             }
 
-            if (state.OwnerId != clientId && !isAdmin)
+            if (state.OwnerId != client.ClientId && !client.IsAdmin)
             {
                 errorType = "UnauthorizedAccessException";
                 errorMessage = $"Client is not authorized to perform this action on pin {physicalPin}. It is owned by {state.OwnerId}.";
@@ -132,24 +187,27 @@ namespace DevDecoder.GpioSimulator.Common
             return true;
         }
 
-        public bool TryClosePin(int physicalPin, string clientId, bool isAdmin, out string? errorType, out string? errorMessage)
+        internal GSEResult ClosePin(IGpioSimulatorClient client, int physicalPin)
         {
-            if (!CheckAccess(physicalPin, clientId, isAdmin, out errorType, out errorMessage)) return false;
+            if (!CheckAccess(client, physicalPin, out var errorType, out var errorMessage)) 
+                return GSEResult.Error(errorType!, errorMessage!);
 
             if (_pinStates.TryRemove(physicalPin, out _))
             {
                 PinClosed?.Invoke(physicalPin);
             }
-            return true;
+            return GSEResult.OK;
         }
 
-        public bool TryWritePin(int physicalPin, string value, string clientId, bool isAdmin, out string? errorType, out string? errorMessage)
+        internal GSEResult WritePin(IGpioSimulatorClient client, int physicalPin, string value)
         {
-            if (!CheckAccess(physicalPin, clientId, isAdmin, out errorType, out errorMessage)) return false;
+            if (!CheckAccess(client, physicalPin, out var errorType, out var errorMessage)) 
+                return GSEResult.Error(errorType!, errorMessage!);
 
             while (true)
             {
-                if (!_pinStates.TryGetValue(physicalPin, out var state)) return false;
+                if (!_pinStates.TryGetValue(physicalPin, out var state)) 
+                    return GSEResult.Error("InvalidOperationException", $"Pin {physicalPin} is not open.");
                 var newState = state with { Value = value };
                 if (_pinStates.TryUpdate(physicalPin, newState, state))
                 {
@@ -157,32 +215,31 @@ namespace DevDecoder.GpioSimulator.Common
                     break;
                 }
             }
-            return true;
+            return GSEResult.OK;
         }
 
-        public bool TryReadPin(int physicalPin, string clientId, bool isAdmin, out string value, out string? errorType, out string? errorMessage)
+        internal GSEResult<string> ReadPin(IGpioSimulatorClient client, int physicalPin)
         {
-            value = "Low";
-            if (!CheckAccess(physicalPin, clientId, isAdmin, out errorType, out errorMessage)) return false;
+            if (!CheckAccess(client, physicalPin, out var errorType, out var errorMessage)) 
+                return GSEResult<string>.Error(errorType!, errorMessage!);
 
             if (_pinStates.TryGetValue(physicalPin, out var state))
             {
-                value = state.Value;
-                return true;
+                return GSEResult<string>.OK(state.Value);
             }
             
-            errorType = "InvalidOperationException";
-            errorMessage = $"Pin {physicalPin} is not open.";
-            return false;
+            return GSEResult<string>.Error("InvalidOperationException", $"Pin {physicalPin} is not open.");
         }
 
-        public bool TrySetPinMode(int physicalPin, string mode, string clientId, bool isAdmin, out string? errorType, out string? errorMessage)
+        internal GSEResult SetPinMode(IGpioSimulatorClient client, int physicalPin, string mode)
         {
-            if (!CheckAccess(physicalPin, clientId, isAdmin, out errorType, out errorMessage)) return false;
+            if (!CheckAccess(client, physicalPin, out var errorType, out var errorMessage)) 
+                return GSEResult.Error(errorType!, errorMessage!);
 
             while (true)
             {
-                if (!_pinStates.TryGetValue(physicalPin, out var state)) return false;
+                if (!_pinStates.TryGetValue(physicalPin, out var state)) 
+                    return GSEResult.Error("InvalidOperationException", $"Pin {physicalPin} is not open.");
                 var defaultVal = mode == "InputPullUp" ? "High" : "Low";
                 var newState = state with { Mode = mode, Value = defaultVal };
                 if (_pinStates.TryUpdate(physicalPin, newState, state))
@@ -191,24 +248,28 @@ namespace DevDecoder.GpioSimulator.Common
                     break;
                 }
             }
-            return true;
+            return GSEResult.OK;
         }
 
-        public string GetPinMode(int physicalPin)
+        internal GSEResult<string> GetPinMode(IGpioSimulatorClient client, int physicalPin)
         {
-            return _pinStates.TryGetValue(physicalPin, out var state) ? state.Mode : "None";
+            return GSEResult<string>.OK(_pinStates.TryGetValue(physicalPin, out var state) ? state.Mode : "None");
         }
 
-        public bool IsPinOpen(int physicalPin)
+        internal GSEResult<bool> IsPinOpen(IGpioSimulatorClient client, int physicalPin)
         {
-            return _pinStates.ContainsKey(physicalPin);
+            return GSEResult<bool>.OK(_pinStates.ContainsKey(physicalPin));
         }
 
-        public string? GetPinOwnerId(int physicalPin)
+        internal GSEResult<string?> GetPinOwnerId(IGpioSimulatorClient client, int physicalPin)
         {
-            return _pinStates.TryGetValue(physicalPin, out var state) ? state.OwnerId : null;
+            return GSEResult<string?>.OK(_pinStates.TryGetValue(physicalPin, out var state) ? state.OwnerId : null);
         }
 
+        /// <summary>
+        /// Retrieves the current states of all open pins.
+        /// </summary>
+        /// <returns>A dictionary containing active pin states keyed by physical pin number.</returns>
         public Dictionary<int, (string Mode, string Value, string OwnerId, string OwnerType)> GetAllPinStates()
         {
             var states = new Dictionary<int, (string Mode, string Value, string OwnerId, string OwnerType)>();

@@ -8,9 +8,14 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using DevDecoder.GpioSimulator.Common;
 
 namespace DevDecoder.GpioSimulator
 {
+    /// <summary>
+    /// A GPIO driver implementation that interacts with the GPIO Simulator Server over HTTP and WebSocket protocols, 
+    /// enabling out-of-process and network-distributed pin simulation.
+    /// </summary>
     public class WebAPIDriver : SimulatorDriverBase
     {
         private ClientWebSocket? _wsClient;
@@ -22,16 +27,14 @@ namespace DevDecoder.GpioSimulator
         private readonly object _mappingLock = new object();
         private readonly ManualResetEventSlim _initialMappingReceived = new ManualResetEventSlim(false);
 
-        private class OpenPinResult
-        {
-            public bool Success { get; set; }
-            public string? ErrorType { get; set; }
-            public string? ErrorMessage { get; set; }
-        }
+        private readonly ConcurrentDictionary<string, TaskCompletionSource<GSEResult>> _pendingRequests = 
+            new ConcurrentDictionary<string, TaskCompletionSource<GSEResult>>();
 
-        private readonly ConcurrentDictionary<string, TaskCompletionSource<OpenPinResult>> _pendingRequests = 
-            new ConcurrentDictionary<string, TaskCompletionSource<OpenPinResult>>();
-
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WebAPIDriver"/> class, 
+        /// automatically launching and connecting to the local simulator server if needed.
+        /// </summary>
+        /// <param name="numberingScheme">The pin numbering scheme to use (default: Logical).</param>
         public WebAPIDriver(PinNumberingScheme numberingScheme = PinNumberingScheme.Logical) : base(numberingScheme)
         {
             EnsureServerStartedAndConnected().GetAwaiter().GetResult();
@@ -204,7 +207,7 @@ namespace DevDecoder.GpioSimulator
                         
                         if (requestId != null && _pendingRequests.TryGetValue(requestId, out var tcs))
                         {
-                            tcs.TrySetResult(new OpenPinResult
+                            tcs.TrySetResult(new GSEResult
                             {
                                 Success = status == "success",
                                 ErrorType = errorType,
@@ -286,7 +289,7 @@ namespace DevDecoder.GpioSimulator
             if (_wsClient != null && _wsClient.State == WebSocketState.Open)
             {
                 var requestId = Guid.NewGuid().ToString();
-                var tcs = new TaskCompletionSource<OpenPinResult>();
+                var tcs = new TaskCompletionSource<GSEResult>();
                 _pendingRequests[requestId] = tcs;
                 
                 var payload = $"{{\"action\":\"open\",\"pin\":{pinNumber},\"mode\":\"{mode}\",\"requestId\":\"{requestId}\"}}";
@@ -302,12 +305,7 @@ namespace DevDecoder.GpioSimulator
                 _pendingRequests.TryRemove(requestId, out _);
                 
                 var result = tcs.Task.Result;
-                if (!result.Success)
-                {
-                    if (result.ErrorType == "ArgumentException") throw new ArgumentException(result.ErrorMessage);
-                    if (result.ErrorType == "InvalidOperationException") throw new InvalidOperationException(result.ErrorMessage);
-                    throw new Exception(result.ErrorMessage);
-                }
+                result.ThrowIfError();
             }
             else
             {

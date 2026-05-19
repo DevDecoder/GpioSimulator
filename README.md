@@ -125,7 +125,7 @@ public class GpioUnitTests
         });
         
         // 3. Inject test stimulus directly to simulate external hardware
-        driver.SetPinValueByTest(switchPin, PinValue.High);
+        driver.SetPinValue(switchPin, PinValue.High);
         
         // 4. Assert correct state transition
         Assert.Equal(PinValue.High, controller.Read(ledPin));

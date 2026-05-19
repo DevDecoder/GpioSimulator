@@ -5,11 +5,22 @@ using DevDecoder.GpioSimulator.Common;
 
 namespace DevDecoder.GpioSimulator
 {
+    /// <summary>
+    /// A local, in-memory implementation of the <see cref="GpioDriver"/> that interacts directly 
+    /// with the in-process <see cref="GpioSimulatorEngine"/>, allowing direct and high-performance simulation.
+    /// </summary>
     public class LocalDriver : SimulatorDriverBase
     {
         private readonly GpioSimulatorEngine _engine;
+        private readonly IGpioSimulatorClient _client;
+        private readonly IGpioSimulatorClient _adminClient;
         private readonly string _clientId = Guid.NewGuid().ToString();
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="LocalDriver"/> class with a default in-memory engine 
+        /// and a standard 40-pin Raspberry Pi physical-to-logical pin mapping.
+        /// </summary>
+        /// <param name="numberingScheme">The pin numbering scheme to use (default: Logical).</param>
         public LocalDriver(PinNumberingScheme numberingScheme = PinNumberingScheme.Logical) 
             : this(new GpioSimulatorEngine(), numberingScheme)
         {
@@ -24,10 +35,17 @@ namespace DevDecoder.GpioSimulator
             _engine.LoadBoardMapping("raspberry_pi_5_breakout", defaultMapping);
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="LocalDriver"/> class sharing a custom <see cref="GpioSimulatorEngine"/>.
+        /// </summary>
+        /// <param name="engine">The simulator engine to run the driver against.</param>
+        /// <param name="numberingScheme">The pin numbering scheme to use (default: Logical).</param>
         public LocalDriver(GpioSimulatorEngine engine, PinNumberingScheme numberingScheme = PinNumberingScheme.Logical) 
             : base(numberingScheme)
         {
             _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+            _client = _engine.Connect(_clientId, "controller", false);
+            _adminClient = _engine.Connect("local_admin", "local_admin", true);
             
             _engine.PinStateChanged += HandlePinStateChanged;
             _engine.PinClosed += HandlePinClosed;
@@ -59,6 +77,12 @@ namespace DevDecoder.GpioSimulator
             ClearPinCache(pin);
         }
 
+        /// <summary>
+        /// Converts the given pin number into the physical pin number format.
+        /// </summary>
+        /// <param name="pinNumber">The pin number under the current scheme.</param>
+        /// <returns>The physical pin number.</returns>
+        /// <exception cref="ArgumentException">Thrown if the logical pin is not mapped.</exception>
         protected override int ConvertPin(int pinNumber)
         {
             if (NumberingScheme == PinNumberingScheme.Logical)
@@ -70,79 +94,97 @@ namespace DevDecoder.GpioSimulator
             return pinNumber;
         }
 
+        /// <summary>
+        /// Opens a GPIO pin on the local simulator engine.
+        /// </summary>
+        /// <param name="pinNumber">The logical or physical pin number depending on scheme.</param>
+        /// <param name="mode">The pin mode.</param>
         protected override void OpenPinInternal(int pinNumber, PinMode mode)
         {
             int physicalPin = ConvertPin(pinNumber);
             
-            if (!_engine.TryOpenPin(physicalPin, mode.ToString(), _clientId, "controller", out var errorType, out var errorMessage))
-            {
-                if (errorType == "ArgumentException") throw new ArgumentException(errorMessage);
-                if (errorType == "InvalidOperationException") throw new InvalidOperationException(errorMessage);
-                throw new Exception(errorMessage);
-            }
+            var result = _client.OpenPin(physicalPin, mode.ToString());
+            result.ThrowIfError();
         }
 
-        private void ThrowException(string? errorType, string? errorMessage)
-        {
-            if (errorType == "ArgumentException") throw new ArgumentException(errorMessage);
-            if (errorType == "InvalidOperationException") throw new InvalidOperationException(errorMessage);
-            if (errorType == "UnauthorizedAccessException") throw new UnauthorizedAccessException(errorMessage);
-            throw new Exception(errorMessage);
-        }
-
+        /// <summary>
+        /// Closes a GPIO pin on the local simulator engine.
+        /// </summary>
+        /// <param name="pinNumber">The logical or physical pin number.</param>
         protected override void ClosePinInternal(int pinNumber)
         {
             int physicalPin = ConvertPin(pinNumber);
-            if (!_engine.TryClosePin(physicalPin, _clientId, false, out var errorType, out var errorMessage))
-            {
-                ThrowException(errorType, errorMessage);
-            }
+            var result = _client.ClosePin(physicalPin);
+            result.ThrowIfError();
         }
 
+        /// <summary>
+        /// Writes a value to a GPIO pin on the local simulator engine.
+        /// </summary>
+        /// <param name="pinNumber">The logical or physical pin number.</param>
+        /// <param name="value">The pin value to write.</param>
         protected override void WriteInternal(int pinNumber, PinValue value)
         {
             int physicalPin = ConvertPin(pinNumber);
-            if (!_engine.TryWritePin(physicalPin, value.ToString(), _clientId, false, out var errorType, out var errorMessage))
-            {
-                ThrowException(errorType, errorMessage);
-            }
+            var result = _client.WritePin(physicalPin, value.ToString());
+            result.ThrowIfError();
         }
 
+        /// <summary>
+        /// Reads the value of a GPIO pin from the local simulator engine.
+        /// </summary>
+        /// <param name="pinNumber">The logical or physical pin number.</param>
+        /// <returns>The read pin value.</returns>
         protected override PinValue ReadInternal(int pinNumber)
         {
             int physicalPin = ConvertPin(pinNumber);
-            if (!_engine.TryReadPin(physicalPin, _clientId, false, out var valStr, out var errorType, out var errorMessage))
-            {
-                ThrowException(errorType, errorMessage);
-            }
-            return valStr == "High" ? PinValue.High : PinValue.Low;
+            var result = _client.ReadPin(physicalPin);
+            result.ThrowIfError();
+            
+            return result.Value == "High" ? PinValue.High : PinValue.Low;
         }
 
+        /// <summary>
+        /// Sets the mode of a GPIO pin on the local simulator engine.
+        /// </summary>
+        /// <param name="pinNumber">The logical or physical pin number.</param>
+        /// <param name="mode">The target pin mode.</param>
         protected override void SetPinModeInternal(int pinNumber, PinMode mode)
         {
             int physicalPin = ConvertPin(pinNumber);
-            if (!_engine.TrySetPinMode(physicalPin, mode.ToString(), _clientId, false, out var errorType, out var errorMessage))
-            {
-                ThrowException(errorType, errorMessage);
-            }
+            var result = _client.SetPinMode(physicalPin, mode.ToString());
+            result.ThrowIfError();
         }
 
+        /// <summary>
+        /// Gets the mode of a GPIO pin from the local simulator engine.
+        /// </summary>
+        /// <param name="pinNumber">The logical or physical pin number.</param>
+        /// <returns>The current pin mode.</returns>
         protected override PinMode GetPinModeInternal(int pinNumber)
         {
             int physicalPin = ConvertPin(pinNumber);
-            return ParsePinMode(_engine.GetPinMode(physicalPin));
+            var result = _client.GetPinMode(physicalPin);
+            result.ThrowIfError();
+            return ParsePinMode(result.Value!);
         }
 
-        public void SetPinValueByTest(int pinNumber, PinValue value)
+        /// <summary>
+        /// Simulates external physical stimulus/hardware interaction on a pin using administrative bypass.
+        /// </summary>
+        /// <param name="pinNumber">The logical or physical pin number.</param>
+        /// <param name="value">The pin value to drive the pin to.</param>
+        public void SetPinValue(int pinNumber, PinValue value)
         {
             int physicalPin = ConvertPin(pinNumber);
             // Simulate physical button/external stimulus
-            if (!_engine.TryWritePin(physicalPin, value.ToString(), "test_harness", true, out var errorType, out var errorMessage))
-            {
-                ThrowException(errorType, errorMessage);
-            }
+            var result = _adminClient.WritePin(physicalPin, value.ToString());
+            result.ThrowIfError();
         }
 
+        /// <summary>
+        /// Gets the underlying shared simulator engine.
+        /// </summary>
         public GpioSimulatorEngine Engine => _engine;
 
         private PinMode ParsePinMode(string mode)
@@ -151,6 +193,10 @@ namespace DevDecoder.GpioSimulator
             return PinMode.Input;
         }
 
+        /// <summary>
+        /// Disposes of the driver resources, unhooking simulator engine events and closing owned pins.
+        /// </summary>
+        /// <param name="disposing">True if disposing managed resources.</param>
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -163,7 +209,7 @@ namespace DevDecoder.GpioSimulator
                 {
                     if (kvp.Value.OwnerId == _clientId)
                     {
-                        _engine.TryClosePin(kvp.Key, _clientId, false, out _, out _);
+                        _client.ClosePin(kvp.Key);
                     }
                 }
             }

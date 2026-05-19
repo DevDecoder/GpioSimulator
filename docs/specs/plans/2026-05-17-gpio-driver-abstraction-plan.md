@@ -1022,7 +1022,7 @@ Create `src/DevDecoder.GpioSimulator.Local/DevDecoder.GpioSimulator.Local.csproj
 ```
 
 - [ ] **Step 2: Implement LocalDriver.cs**
-Implement `LocalDriver` to execute fully in-memory by wrapping a local `GpioSimulatorEngine` instance, sync its events back to client callbacks, and provide a stimulus method `SetPinValueByTest` for unit tests to trigger inputs:
+Implement `LocalDriver` to execute fully in-memory by wrapping a local `GpioSimulatorEngine` instance, sync its events back to client callbacks, and provide a stimulus method `SetPinValue` for unit tests to trigger inputs:
 
 ```csharp
 using System;
@@ -1140,7 +1140,7 @@ namespace DevDecoder.GpioSimulator
             return ParsePinMode(_engine.GetPinMode(physicalPin));
         }
 
-        public void SetPinValueByTest(int pinNumber, PinValue value)
+        public void SetPinValue(int pinNumber, PinValue value)
         {
             int physicalPin = ConvertPin(pinNumber);
             // Simulate physical button/external stimulus
@@ -1758,7 +1758,7 @@ public class ClientConnection
 - Update: `src/DevDecoder.GpioSimulator.Tests/GpioControllerTests.cs`
 
 - [ ] **Step 1: Implement GpioControllerTests using LocalDriver**
-Reference `DevDecoder.GpioSimulator.Local` project in the test assembly. Rewrite tests in `src/DevDecoder.GpioSimulator.Tests/GpioControllerTests.cs` to execute 100% offline, visual-free, and blazing-fast by instantiating `LocalDriver` under the `GpioController` under test. Use the public `SetPinValueByTest` stimulus method to trigger inputs:
+Reference `DevDecoder.GpioSimulator.Local` project in the test assembly. Rewrite tests in `src/DevDecoder.GpioSimulator.Tests/GpioControllerTests.cs` to execute 100% offline, visual-free, and blazing-fast by instantiating `LocalDriver` under the `GpioController` under test. Use the public `SetPinValue` stimulus method to trigger inputs:
 
 ```csharp
 using System;
@@ -1838,7 +1838,7 @@ namespace DevDecoder.GpioSimulator.Tests
                 });
 
                 // Act - Simulate high external stimulus (button press)
-                driver.SetPinValueByTest(17, PinValue.High);
+                driver.SetPinValue(17, PinValue.High);
                 System.Threading.Thread.Sleep(50); // allow event callback execution
 
                 // Assert
@@ -1861,7 +1861,7 @@ namespace DevDecoder.GpioSimulator.Tests
                 System.Threading.Tasks.Task.Run(() =>
                 {
                     System.Threading.Thread.Sleep(200);
-                    driver.SetPinValueByTest(4, PinValue.High);
+                    driver.SetPinValue(4, PinValue.High);
                 });
 
                 var result = controller.WaitForEvent(4, PinEventTypes.Rising, TimeSpan.FromSeconds(2));
