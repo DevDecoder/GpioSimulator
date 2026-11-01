@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Pointer to the shared git hooks in universal-skills (hooks/git/dispatch). Identical for every hook name; installed by
+# bin/install-git-hooks. Repo-specific logic belongs in .githooks/local/<hook-name>, never in this file.
+us="${UNIVERSAL_SKILLS:-$HOME/.claude/universal-skills}"
+if [ -x "$us/hooks/git/dispatch" ]; then
+  exec "$us/hooks/git/dispatch" "$(basename "$0")" "$@"
+fi
+# No checkout on this machine: nothing shared to run, but the repo's own gate (e.g. pre-push CI marker) must still fire.
+local_hook="$(dirname "$0")/local/$(basename "$0")"
+[ -x "$local_hook" ] && exec "$local_hook" "$@"
+exit 0
