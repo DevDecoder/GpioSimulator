@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Report worktrees left behind after a merge (shared hook in universal-skills: hooks/git/post-merge; worktree hygiene rule).
+# UNIVERSAL_SKILLS overrides the default location of the universal-skills checkout; a missing checkout is silently skipped.
+us="${UNIVERSAL_SKILLS:-$HOME/.claude/universal-skills}"
+[ -x "$us/hooks/git/post-merge" ] && "$us/hooks/git/post-merge"
+exit 0
